@@ -23,7 +23,9 @@ dependencyResolutionManagement {
 rootProject.name = "YTMusicHyperLyric"
 include(":plugins:api")
 include(":plugins:lrclib")
+include(":modules:xposed-lrclib")
 
 project(":plugins").projectDir = file("Plugins")
 project(":plugins:api").projectDir = file("Plugins/api")
 project(":plugins:lrclib").projectDir = file("Plugins/modules/lrclib")
+project(":modules:xposed-lrclib").projectDir = file("Modules/xposed-lrclib")

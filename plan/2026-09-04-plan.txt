@@ -1,5 +1,7 @@
 # 项目计划：HyperLyric LRCLIB 歌词功能插件
 
+> 2026-09-04 真机验证结论（当前方案优先级最高）：HyperOS 拒绝 HyperLyric v7.4 将功能插件 ZIP 的 DEX 从可写 `SystemUI/code_cache` 动态加载，导致 ZIP 插件在入口执行前即失败。因此本仓库新增并优先交付传统 LSPosed APK 模块 `:modules:xposed-lrclib`。它在 SystemUI 监听 YouTube Music MediaSession，通过 Lyricon Provider 向 HyperLyric 已有 Lyricon 歌词源发布数据。原 ZIP 实现保留为兼容性备份，但不作为该设备的交付物。
+
 ## 0. 架构定性
 
 本仓库开发的是 HyperLyric 的“功能插件”，不是直接交给 LSPosed 管理的传统 Xposed 模块 APK。
@@ -406,16 +408,25 @@ HyperLyric 正确显示同步歌词
 - 酷狗 Provider；
 - 保持 Provider 与 HyperLyric API 解耦。
 
-## 十四、独立 Xposed APK 的另行计划
+## 十四、独立 Xposed APK（当前实施方案）
 
-只有当目标改为“独立、不依赖 HyperLyric Plugin Runtime 的 Xposed 模块”时，才新增单独模块：
+当前目标已经改为“独立、不依赖 HyperLyric Plugin Runtime 的 Xposed 模块”，目录为：
 
 ~~~text
-app/
+Modules/xposed-lrclib/
 └── src/main/resources/META-INF/xposed/
     ├── module.prop
     ├── java_init.list
     └── scope.list
 ~~~
 
-该模块需要自行处理 Xposed 入口、SystemUI/播放器数据获取、歌词输出和兼容性；它与当前 plugins:lrclib ZIP 插件是两种不同交付物，不在本计划范围内。
+模块职责：
+
+- LSPosed 作用域只选 `com.android.systemui`；
+- 在 `Application.onCreate` 后初始化；
+- 监听 `com.google.android.apps.youtube.music` 的活跃 MediaSession、元数据与播放状态；
+- 用保守的 LRCLIB exact + search fallback 查询同步 LRC；
+- 将 LRC 转为 Lyricon `Song`/`RichLyricLine`，以 `playerPackageName=YouTube Music` 发布；
+- HyperLyric 保持「Lyricon」歌词源，继续只承担渲染。
+
+真机安装 APK 后，需要在 LSPosed 为这个新模块启用并勾选 SystemUI，然后重启 SystemUI。它不会再通过 HyperLyric 的“插件管理”安装。

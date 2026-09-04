@@ -56,25 +56,31 @@ internal class LrclibProcessor(private val context: PluginContext) : LyricProces
             if (Thread.currentThread().isInterrupted) return null
             val cacheKey = cacheKey(queryTitle, artist, album, durationMs)
             val cached = context.cache.getString(cacheKey)
-            val syncedLyrics = if (cached != null) {
+            val fetched = if (cached != null) {
                 logger.debug("缓存命中: title=$queryTitle")
-                cached
+                FetchedLyrics(cached, source = "cache")
             } else {
-                val fetched = client.fetch(config.endpoint, queryTitle, artist, album, durationMs, deadline)
-                    ?: continue
+                val fetchedFromNetwork = client.fetch(
+                    config.endpoint,
+                    queryTitle,
+                    artist,
+                    album,
+                    durationMs,
+                    deadline,
+                ) ?: continue
                 if (Thread.currentThread().isInterrupted) return null
-                context.cache.putString(cacheKey, fetched)
-                fetched
+                context.cache.putString(cacheKey, fetchedFromNetwork.syncedLyrics)
+                fetchedFromNetwork
             }
 
-            val lines = LrcParser.parse(syncedLyrics, durationMs ?: 0L)
+            val lines = LrcParser.parse(fetched.syncedLyrics, durationMs ?: 0L)
             if (lines.isNullOrEmpty()) {
                 context.cache.remove(cacheKey)
                 logger.debug("歌词无有效时间轴: title=$queryTitle")
                 continue
             }
 
-            logger.info("歌词命中: lines=${lines.size}, cached=${cached != null}, title=$queryTitle")
+            logger.info("歌词命中: lines=${lines.size}, source=${fetched.source}, title=$queryTitle")
             return PluginSongResult(
                 song = song.copy(lyrics = lines),
                 changedFields = setOf(PluginSongField.LYRICS),

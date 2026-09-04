@@ -9,7 +9,7 @@
     "en": "Fetch synced lyrics from LRCLIB and keep the current source on a miss or invalid timeline"
   },
   "author": "YTMusicHyperLyric",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "apiVersion": 1,
   "entry": "com.lance.ytmusichyperlyric.plugin.lrclib.LrclibPlugin",
   "activationSettingKey": "enabled",

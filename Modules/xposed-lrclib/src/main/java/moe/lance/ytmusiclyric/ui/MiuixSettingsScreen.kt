@@ -1,7 +1,17 @@
 package moe.lance.ytmusiclyric.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
+import android.widget.Toast
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,12 +40,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import moe.lance.ytmusiclyric.CarBluetoothLyricConfig
@@ -526,6 +540,10 @@ private fun SettingsContent(
         HorizontalDivider(modifier = Modifier.padding(horizontal = 20.dp))
         BasicComponent(title = "YouTube Music", summary = "在 LSPosed 作用域勾选 YouTube Music，用于拦截播放并推送车载蓝牙歌词。")
     }
+
+    Section(title = "关于") {
+        AboutContent()
+    }
 }
 
 @Composable
@@ -821,4 +839,197 @@ internal fun MiuixInput(
             .padding(bottom = 10.dp),
     )
 }
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun AboutContent() {
+    val context = LocalContext.current
+    val packageInfo = remember(context) {
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.packageManager.getPackageInfo(
+                    context.packageName,
+                    PackageManager.PackageInfoFlags.of(0),
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                context.packageManager.getPackageInfo(context.packageName, 0)
+            }
+        }.getOrNull()
+    }
+    val rawVersionName = packageInfo?.versionName ?: "0.2.0"
+    val versionCode = packageInfo?.let {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            it.longVersionCode
+        } else {
+            @Suppress("DEPRECATION")
+            it.versionCode.toLong()
+        }
+    } ?: 1L
+    val versionDisplay = if (rawVersionName.startsWith("v", ignoreCase = true)) {
+        "$rawVersionName ($versionCode)"
+    } else {
+        "v$rawVersionName ($versionCode)"
+    }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        AboutLineRow(
+            annotatedText = buildAnnotatedString {
+                withStyle(
+                    SpanStyle(
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 14.sp,
+                        color = MiuixTheme.colorScheme.onSurface,
+                    ),
+                ) {
+                    append("作者：")
+                }
+                withStyle(
+                    SpanStyle(
+                        fontWeight = FontWeight.Normal,
+                        fontSize = 13.5.sp,
+                        color = MiuixTheme.colorScheme.primary,
+                    ),
+                ) {
+                    append("@LanceMoe")
+                }
+                withStyle(
+                    SpanStyle(
+                        fontWeight = FontWeight.Normal,
+                        fontSize = 12.5.sp,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    ),
+                ) {
+                    append("（https://github.com/LanceMoe）")
+                }
+            },
+            isLink = true,
+            onClick = {
+                openBrowser(context, "https://github.com/LanceMoe")
+            },
+            onLongClick = {
+                copyToClipboard(context, "https://github.com/LanceMoe", "已复制作者主页链接")
+            },
+        )
+
+        HorizontalDivider(modifier = Modifier.padding(horizontal = 20.dp))
+
+        AboutLineRow(
+            annotatedText = buildAnnotatedString {
+                withStyle(
+                    SpanStyle(
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 14.sp,
+                        color = MiuixTheme.colorScheme.onSurface,
+                    ),
+                ) {
+                    append("GitHub仓库：")
+                }
+                withStyle(
+                    SpanStyle(
+                        fontWeight = FontWeight.Normal,
+                        fontSize = 13.sp,
+                        color = MiuixTheme.colorScheme.primary,
+                    ),
+                ) {
+                    append("https://github.com/LanceMoe/YTMusicHyperLyric")
+                }
+            },
+            isLink = true,
+            onClick = {
+                openBrowser(context, "https://github.com/LanceMoe/YTMusicHyperLyric")
+            },
+            onLongClick = {
+                copyToClipboard(context, "https://github.com/LanceMoe/YTMusicHyperLyric", "已复制仓库链接")
+            },
+        )
+
+        HorizontalDivider(modifier = Modifier.padding(horizontal = 20.dp))
+
+        AboutLineRow(
+            annotatedText = buildAnnotatedString {
+                withStyle(
+                    SpanStyle(
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 14.sp,
+                        color = MiuixTheme.colorScheme.onSurface,
+                    ),
+                ) {
+                    append("版本信息：")
+                }
+                withStyle(
+                    SpanStyle(
+                        fontWeight = FontWeight.Normal,
+                        fontSize = 13.5.sp,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    ),
+                ) {
+                    append(versionDisplay)
+                }
+            },
+            isLink = false,
+            onClick = {
+                copyToClipboard(context, "YouTube Music HyperLyric $versionDisplay", "已复制版本信息：$versionDisplay")
+            },
+            onLongClick = {
+                copyToClipboard(context, "YouTube Music HyperLyric $versionDisplay", "已复制版本信息：$versionDisplay")
+            },
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun AboutLineRow(
+    annotatedText: androidx.compose.ui.text.AnnotatedString,
+    isLink: Boolean,
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick,
+            )
+            .padding(horizontal = 20.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(modifier = Modifier.weight(1f)) {
+            Text(
+                text = annotatedText,
+                lineHeight = 19.sp,
+            )
+        }
+        if (isLink) {
+            Spacer(Modifier.width(8.dp))
+            Icon(
+                imageVector = MiuixIcons.Basic.ArrowRight,
+                contentDescription = "打开链接",
+                tint = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.4f),
+                modifier = Modifier.size(15.dp),
+            )
+        }
+    }
+}
+
+private fun openBrowser(context: Context, url: String) {
+    try {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(intent)
+    } catch (_: Exception) {
+        copyToClipboard(context, url, "无法打开浏览器，已复制链接到剪贴板")
+    }
+}
+
+private fun copyToClipboard(context: Context, text: String, toastMessage: String) {
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+    val clip = ClipData.newPlainText("text", text)
+    clipboard?.setPrimaryClip(clip)
+    Toast.makeText(context, toastMessage, Toast.LENGTH_SHORT).show()
+}
+
 

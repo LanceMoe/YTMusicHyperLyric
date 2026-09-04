@@ -52,6 +52,8 @@
   - 内置 64 条并发 LRU 缓存，切回已播歌曲毫秒级秒开。
 - 🛡️ **HyperOS 动态 DEX 兼容补丁**  
   模块内嵌 SystemUI 级 Hook，动态拦截 `BaseDexClassLoader` 并在 ART 加载前将 HyperLyric 释放的插件 DEX 标记为只读，原生解决 HyperOS / Android 14+ 报错拒绝加载可写 DEX 的痛点。
+- 🚗 **车载蓝牙歌词显示 (AVRCP 同步)**  
+  支持将精准歌词实时注入 YouTube Music 的 `MediaSession`，通过标准蓝牙 AVRCP 协议向汽车中控屏与仪表盘动态推送滚动歌词。具备蓝牙 A2DP 智能感知（断开或暂停自动还原歌名）、多展示槽位（标题替换/拼接/歌手/专辑）与毫秒级延迟微调。
 
 ---
 
@@ -62,34 +64,40 @@ flowchart TD
     YTM["YouTube Music\n(com.google.android.apps.youtube.music)"]
     MS["MediaSession\n(Metadata & PlaybackState)"]
     
-    subgraph SystemUI["com.android.systemui (SystemUI 进程)"]
+    subgraph CarBT["车载蓝牙歌词通道 (YouTube Music 进程 Hook)"]
+        CB_HOOK["CarBluetoothLyricController\n(Hook setMetadata / PlaybackState)"]
+        CB_TRACKER["BluetoothStateTracker\n(A2DP 连接感知)"]
+        CB_TICKER["CarLyricTicker\n(时间轴调度 / 槽位格式化)"]
+    end
+
+    subgraph SystemUI["HyperLyric 通道 (com.android.systemui 进程)"]
         MOD["YTMusicHyperLyric\n(LSPosed 模块)"]
-        NORM["LyricsNormalizer\n(标题清洗 / UGC拆解 / 简繁转换)"]
-        REPO["LyricsRepository\n(三级级联引擎)"]
-        LRC["LrcToLyricon\n(LRC 时间戳解析与规整)"]
         PROV["LyriconProvider\n(官方 Lyricon IPC 协议)"]
-        
-        subgraph Sources["歌词检索源"]
-            S1["1. LRCLIB (Exact + Search)"]
-            S2["2. 网易云音乐 (CloudSearch + Duration Match)"]
-            S3["3. 酷狗音乐 (Keyword Search + Duration Match)"]
-        end
-        
         HL["HyperLyric 宿主\n(选择 Lyricon 歌词源)"]
     end
-    
+
+    subgraph SharedLogic["三源检索与清洗引擎"]
+        NORM["LyricsNormalizer\n(标题清洗 / UGC拆解 / 简繁转换)"]
+        REPO["LyricsRepository\n(LRCLIB + 网易云 + 酷狗)"]
+        LRC["LrcToLyricon\n(LRC 时间轴毫秒级规整)"]
+    end
+
+    CAR["汽车中控屏 / 仪表盘\n(Bluetooth AVRCP 协议)"]
     UI["系统 UI 展现\n(状态栏歌词 / 焦点胶囊 / 桌面悬浮窗 / 锁屏)"]
 
-    YTM -- "发布播放状态" --> MS
-    MS -- "OnActiveSessionsChanged\n& onMetadataChanged" --> MOD
-    MOD --> NORM
-    NORM --> REPO
-    REPO --> S1
-    S1 -- "未命中" --> S2
-    S2 -- "未命中" --> S3
-    S1 & S2 & S3 -- "命中 LRC" --> LRC
+    %% YouTube Music & Car Bluetooth
+    YTM -- "播放音乐 / 切歌" --> CB_HOOK
+    CB_HOOK --> NORM
+    NORM --> REPO --> LRC
+    LRC --> CB_TICKER
+    CB_TRACKER -- "蓝牙已连接" --> CB_TICKER
+    CB_TICKER -- "动态更新 Title / Artist" --> MS
+    MS -- "标准 AVRCP 协议推送" --> CAR
+
+    %% SystemUI & HyperLyric
+    MS -- "OnActiveSessionsChanged" --> MOD
+    MOD --> PROV
     LRC --> PROV
-    MOD -- "实时 PlaybackState 同步" --> PROV
     PROV -- "IPC 数据分发" --> HL
     HL --> UI
 ```
@@ -117,20 +125,31 @@ flowchart TD
 
 1. 打开 **LSPosed** 管理器；
 2. 在模块列表中找到 **YouTube Music HyperLyric**（包名：`moe.lance.ytmusiclyric`）并启用；
-3. **作用域配置**：
-   - 勾选 **系统界面 (`System UI` / `com.android.systemui`)**；
-   - ⚠️ **请勿勾选 YouTube Music**（模块运行在 SystemUI 进程内监听媒体会话，无需勾选播放器本身）；
-4. **重启手机** 或在 LSPosed 中重启 SystemUI。
+3. **作用域配置 (根据需求按需勾选)**：
+   - ✅ **系统界面 (`System UI` / `com.android.systemui`)**：用于接入 HyperLyric 状态栏/灵动岛焦点胶囊歌词；
+   - ✅ **YouTube Music (`com.google.android.apps.youtube.music`)**：用于**车载蓝牙显示歌词** (通过 AVRCP 协议向汽车屏幕推送歌词)；
+   - *提示：两者可同时勾选，互不冲突。*
+4. **生效配置**：若勾选了 SystemUI 请重启手机或重启 SystemUI；若勾选了 YouTube Music 强行停止一次 YT Music 重新打开即可。
 
-### 第三步：配置 HyperLyric 宿主
+### 第三步：个性化设置与测试 (可选)
+
+在应用桌面或 LSPosed 模块详情中打开 **YouTube Music HyperLyric** 设置界面：
+- **功能开关**：随时开启/关闭车载蓝牙歌词；
+- **仅连接蓝牙时生效** (默认开启)：未连蓝牙时不更改手机锁屏/通知栏歌名，连接汽车时自动推送歌词；
+- **显示槽位选择**：支持**标题栏替换** (推荐)、**歌名 - 歌词拼接**、**歌手栏替换** 或 **专辑栏替换**；
+- **时间轴补偿**：支持微调毫秒偏移，完美匹配不同品牌车机的蓝牙音频解码延迟；
+- **即时测试工具**：输入歌名与歌手即可一键测试三源抓取并预览车机推送效果。
+
+### 第四步：配置 HyperLyric 宿主 (若使用 HyperLyric)
 
 1. 打开 **HyperLyric** 应用；
 2. 进入歌词源设置，确保将歌词源切换/勾选为 **Lyricon**；
 3. 授予 HyperLyric 所需的悬浮窗、状态栏通知或辅助功能权限。
 
-### 第四步：畅享同步歌词
+### 第五步：畅享同步歌词
 
-打开 **YouTube Music** 播放任意歌曲，HyperLyric 状态栏/灵动岛胶囊将即刻呈现精准同步的歌词！
+- **状态栏/灵动岛**：打开 YouTube Music 播放歌曲，HyperLyric 胶囊即刻走字；
+- **汽车中控/仪表盘**：连接车载蓝牙播放，车机屏幕自动实时滚动显示当前歌词！
 
 ---
 

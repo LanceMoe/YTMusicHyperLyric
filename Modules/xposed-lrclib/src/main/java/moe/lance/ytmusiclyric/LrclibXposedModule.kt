@@ -36,15 +36,31 @@ class LrclibXposedModule : XposedModule() {
     }
 
     override fun onPackageLoaded(param: PackageLoadedParam) {
-        if (param.packageName != SYSTEM_UI || Application.getProcessName().contains(':')) return
+        if (Application.getProcessName().contains(':')) return
 
+        when {
+            param.packageName == SYSTEM_UI -> initSystemUiHook(param)
+            isYouTubeMusic(param.packageName) -> initYouTubeMusicHook(param)
+        }
+    }
+
+    private fun isYouTubeMusic(packageName: String): Boolean {
+        return packageName == YT_MUSIC || packageName.endsWith(".youtube.music")
+    }
+
+    private fun initYouTubeMusicHook(param: PackageLoadedParam) {
+        Log.i(TAG, "Initializing YouTube Music Car Bluetooth Lyric Hook for ${param.packageName}")
+        CarBluetoothLyricController(this).install(param)
+    }
+
+    private fun initSystemUiHook(param: PackageLoadedParam) {
         installPluginDexReadOnlyHook(param)
         runCatching {
             val appClass = param.defaultClassLoader.loadClass("android.app.Application")
             val onCreate = appClass.getDeclaredMethod("onCreate")
             deoptimize(onCreate)
             hook(onCreate).intercept(ApplicationCreateHook())
-            Log.i(TAG, "Application.onCreate hook installed")
+            Log.i(TAG, "Application.onCreate hook installed for SystemUI")
         }.onFailure { error ->
             Log.e(TAG, "Could not install SystemUI lifecycle hook", error)
         }

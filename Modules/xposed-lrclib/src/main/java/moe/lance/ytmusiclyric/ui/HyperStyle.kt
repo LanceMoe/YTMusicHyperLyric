@@ -15,6 +15,8 @@ import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.widget.Button
 import android.widget.EditText
+import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Switch
@@ -177,13 +179,97 @@ internal class HyperStyle(private val activity: Activity) {
         }
     }
 
-    /** Shared insets and typography; constrain the column on tablets and in landscape. */
     fun page(title: String, subtitle: String? = null, back: Boolean = false): LinearLayout {
-        activity.window.setDecorFitsSystemWindows(false)
-        val dark = activity.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
-        val lightBars = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+        val (scroll, content) = pageContent(title, subtitle, back, R.id.settings_scroll)
+        installPage(scroll)
+        content.requestFocus()
+        return content
+    }
+
+    data class Tab(val title: String, val scrollId: Int, val buttonId: Int, val iconRes: Int)
+
+    /** Keep both pages mounted so each tab retains its inputs and scroll position. */
+    fun tabbedPage(tabs: List<Tab>, initialIndex: Int, onSelected: (Int) -> Unit): List<LinearLayout> {
+        val root = column()
+        val pages = FrameLayout(activity)
+        root.addView(pages, LinearLayout.LayoutParams(-1, 0, 1f))
+        val contents = tabs.map { tab ->
+            pageContent(tab.title, "YouTube Music HyperLyric", false, tab.scrollId).also { (scroll, _) ->
+                pages.addView(scroll, FrameLayout.LayoutParams(-1, -1))
+            }
+        }
+        // Match HyperLyric's default Miuix NavigationBar: 26dp icons, 12sp labels,
+        // 64dp items and monochrome emphasis, with no filled selection capsule.
+        val tabBar = column().apply {
+            setBackgroundColor(surface)
+        }
+        tabBar.addView(View(activity).apply {
+            setBackgroundColor(activity.getColor(R.color.hyper_divider))
+        }, LinearLayout.LayoutParams(-1, 1))
+        val tabRow = row()
+        tabBar.addView(tabRow, LinearLayout.LayoutParams(-1, -2))
+        fun foreground(alpha: Float) = (text and 0x00FFFFFF) or ((255 * alpha).toInt() shl 24)
+        val colors = ColorStateList(
+            arrayOf(
+                intArrayOf(android.R.attr.state_selected, android.R.attr.state_pressed),
+                intArrayOf(android.R.attr.state_pressed),
+                intArrayOf(android.R.attr.state_selected),
+                intArrayOf(),
+            ),
+            intArrayOf(foreground(0.5f), foreground(0.6f), text, foreground(0.4f)),
+        )
+        val items = mutableListOf<Pair<LinearLayout, TextView>>()
+        fun select(index: Int) {
+            activity.window.insetsController?.hide(WindowInsets.Type.ime())
+            contents.forEachIndexed { i, (scroll, content) ->
+                scroll.visibility = if (i == index) View.VISIBLE else View.GONE
+                if (i == index) content.requestFocus()
+            }
+            items.forEachIndexed { i, (item, label) ->
+                item.isSelected = i == index
+                label.typeface = if (i == index) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+            }
+            onSelected(index)
+        }
+        tabs.forEachIndexed { index, tab ->
+            val item = column().apply {
+                id = tab.buttonId
+                gravity = Gravity.CENTER_HORIZONTAL
+                minimumHeight = dp(64)
+                setPadding(dp(8), dp(8), dp(8), dp(8))
+                isFocusable = true
+                contentDescription = tab.title
+                setOnClickListener { select(index) }
+            }
+            item.addView(ImageView(activity).apply {
+                setImageResource(tab.iconRes)
+                imageTintList = colors
+                isDuplicateParentStateEnabled = true
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            }, LinearLayout.LayoutParams(dp(26), dp(26)))
+            val label = label(tab.title, 12f).apply {
+                setTextColor(colors)
+                includeFontPadding = false
+                gravity = Gravity.CENTER
+                setLineSpacing(0f, 1f)
+                isDuplicateParentStateEnabled = true
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            }
+            item.addView(label, LinearLayout.LayoutParams(-1, -2).apply {
+                topMargin = dp(2)
+            })
+            items.add(item to label)
+            tabRow.addView(item, LinearLayout.LayoutParams(0, -2, 1f))
+        }
+        root.addView(tabBar, LinearLayout.LayoutParams(-1, -2))
+        installPage(root, tabBar)
+        select(initialIndex.coerceIn(tabs.indices))
+        return contents.map { it.second }
+    }
+
+    private fun pageContent(title: String, subtitle: String?, back: Boolean, scrollId: Int): Pair<ScrollView, LinearLayout> {
         val scroll = ScrollView(activity).apply {
-            id = R.id.settings_scroll
+            id = scrollId
             setBackgroundColor(this@HyperStyle.background)
             isFillViewport = true
             isVerticalScrollBarEnabled = false
@@ -206,24 +292,35 @@ internal class HyperStyle(private val activity: Activity) {
         if (subtitle != null) content.addView(label(subtitle, 14f, secondary).apply {
             setPadding(dp(20), 0, dp(20), dp(4))
         })
+        return scroll to content
+    }
+
+    /** Shared insets; constrain the column on tablets and in landscape. */
+    private fun installPage(root: View, bottomBar: View? = null) {
+        activity.window.setDecorFitsSystemWindows(false)
+        activity.window.isNavigationBarContrastEnforced = false
+        root.setBackgroundColor(background)
         fun updatePadding(insets: WindowInsets?) {
             val bars = insets?.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
             val keyboard = insets?.getInsets(WindowInsets.Type.ime())?.bottom ?: 0
             val left = bars?.left ?: 0
             val right = bars?.right ?: 0
-            val gutter = ((scroll.width - left - right - dp(680)) / 2).coerceAtLeast(0)
-            scroll.setPadding(left + gutter, bars?.top ?: 0, right + gutter, maxOf(bars?.bottom ?: 0, keyboard))
+            val gutter = ((root.width - left - right - dp(680)) / 2).coerceAtLeast(0)
+            val bottom = bars?.bottom ?: 0
+            bottomBar?.setPadding(0, 0, 0, if (keyboard > 0) 0 else bottom)
+            root.setPadding(left + gutter, bars?.top ?: 0, right + gutter,
+                if (bottomBar != null) keyboard else maxOf(bottom, keyboard))
         }
-        scroll.setOnApplyWindowInsetsListener { _, insets -> updatePadding(insets); insets }
-        scroll.addOnLayoutChangeListener { _, l, _, r, _, oldL, _, oldR, _ ->
-            if (r - l != oldR - oldL) updatePadding(scroll.rootWindowInsets)
+        root.setOnApplyWindowInsetsListener { _, insets -> updatePadding(insets); insets }
+        root.addOnLayoutChangeListener { _, l, _, r, _, oldL, _, oldR, _ ->
+            if (r - l != oldR - oldL) updatePadding(root.rootWindowInsets)
         }
-        activity.setContentView(scroll)
+        activity.setContentView(root)
         // PhoneWindow.getInsetsController() requires the DecorView created by setContentView.
         // A safe call on its result cannot protect against a null DecorView inside that getter.
+        val dark = activity.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
+        val lightBars = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
         activity.window.insetsController?.setSystemBarsAppearance(if (dark) 0 else lightBars, lightBars)
-        content.requestFocus()
-        scroll.requestApplyInsets()
-        return content
+        root.requestApplyInsets()
     }
 }

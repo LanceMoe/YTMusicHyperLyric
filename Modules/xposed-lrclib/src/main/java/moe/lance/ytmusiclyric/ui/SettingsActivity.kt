@@ -37,6 +37,7 @@ class SettingsActivity : Activity() {
     private lateinit var cacheListContainer: LinearLayout
     private var currentSearchKeyword = ""
     private var cacheRequest = 0
+    private var selectedTab = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -54,7 +55,19 @@ class SettingsActivity : Activity() {
                 .apply()
         }
 
-        val content = ui.page("设置", "YouTube Music HyperLyric")
+        selectedTab = savedInstanceState?.getInt("selectedTab", 0) ?: 0
+        val pages = ui.tabbedPage(
+            listOf(
+                HyperStyle.Tab("设置", R.id.settings_scroll, R.id.settings_tab, R.drawable.ic_nav_settings),
+                HyperStyle.Tab("歌词缓存", R.id.cache_scroll, R.id.cache_tab, R.drawable.ic_nav_music),
+            ),
+            initialIndex = selectedTab,
+        ) { index ->
+            selectedTab = index
+            if (index == 1) loadCacheList()
+        }
+        val content = pages[0]
+        setupCacheTab(pages[1])
         val car = ui.section(content, "车载蓝牙歌词")
         ui.toggle(car, "显示车载歌词", "将同步歌词推送到车机的歌曲信息栏", config.enabled) {
             saveConfig(config.copy(enabled = it))
@@ -117,26 +130,6 @@ class SettingsActivity : Activity() {
         lateinit var restartButton: Button
         restartButton = ui.button("重启 SystemUI") { restartSystemUi(restartButton, restartStatus) }
         restartContent.addView(restartButton, LinearLayout.LayoutParams(-1, -2))
-
-        val cache = ui.section(content, "本地歌词")
-        val cacheContent = ui.paddedContent(cache)
-        cacheContent.addView(ui.label("歌词缓存", 18f, bold = true))
-        ui.hint(cacheContent, "点击歌曲可编辑歌词、手动搜索或重新下载。下载失败的歌曲也会保留记录。")
-        cacheStatsText = ui.label("正在统计缓存…", 13f, ui.secondary)
-        cacheContent.addView(cacheStatsText, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = ui.dp(12) })
-        val search = ui.input("搜索歌名或歌手").apply { id = R.id.cache_search }
-        search.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                currentSearchKeyword = s?.toString().orEmpty().trim()
-                loadCacheList()
-            }
-            override fun afterTextChanged(s: Editable?) = Unit
-        })
-        cacheContent.addView(search)
-        cacheListContainer = ui.column()
-        cacheContent.addView(cacheListContainer)
-        cacheContent.addView(ui.button("清空全部缓存", destructive = true) { handleClearAllCache() }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = ui.dp(12) })
 
         val test = ui.paddedContent(ui.section(content, "歌词检索测试"))
         test.addView(ui.label("试试三源检索", 18f, bold = true))
@@ -201,6 +194,31 @@ class SettingsActivity : Activity() {
             gravity = android.view.Gravity.CENTER
             setPadding(ui.dp(12), ui.dp(28), ui.dp(12), 0)
         })
+    }
+
+    private fun setupCacheTab(content: LinearLayout) {
+        val cacheContent = ui.paddedContent(ui.section(content, "本地歌词"))
+        ui.hint(cacheContent, "点击歌曲可编辑歌词、手动搜索或重新下载。下载失败的歌曲也会保留记录。")
+        cacheStatsText = ui.label("正在统计缓存…", 13f, ui.secondary)
+        cacheContent.addView(cacheStatsText, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = ui.dp(12) })
+        val search = ui.input("搜索歌名或歌手").apply { id = R.id.cache_search }
+        search.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                currentSearchKeyword = s?.toString().orEmpty().trim()
+                loadCacheList()
+            }
+            override fun afterTextChanged(s: Editable?) = Unit
+        })
+        cacheContent.addView(search)
+        cacheContent.addView(ui.button("清空全部缓存", destructive = true) { handleClearAllCache() }, LinearLayout.LayoutParams(-1, -2))
+        cacheListContainer = ui.column()
+        cacheContent.addView(cacheListContainer, LinearLayout.LayoutParams(-1, -2).apply { topMargin = ui.dp(8) })
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putInt("selectedTab", selectedTab)
+        super.onSaveInstanceState(outState)
     }
 
     private fun addEqualButton(row: LinearLayout, button: Button, last: Boolean = false) {

@@ -17,8 +17,10 @@ import io.github.libxposed.api.XposedModuleInterface.ModuleLoadedParam
 import io.github.libxposed.api.XposedModuleInterface.PackageLoadedParam
 import io.github.proify.lyricon.lyric.model.RichLyricLine
 import io.github.proify.lyricon.lyric.model.Song
+import io.github.proify.lyricon.provider.ConnectionListener
 import io.github.proify.lyricon.provider.LyriconFactory
 import io.github.proify.lyricon.provider.LyriconProvider
+import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
@@ -26,13 +28,14 @@ import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * A conventional LSPosed module. It deliberately does not use HyperLyric's ZIP PluginRuntime:
- * Android/HyperOS rejects that runtime's writable dynamically loaded dex archive.
+ * A conventional LSPosed module. It repairs HyperLyric's ZIP loading boundary on Android/HyperOS
+ * and also supports a direct Lyricon provider when Lyricon Central is installed.
  */
 class LrclibXposedModule : XposedModule() {
     override fun onModuleLoaded(param: ModuleLoadedParam) {
@@ -42,6 +45,7 @@ class LrclibXposedModule : XposedModule() {
     override fun onPackageLoaded(param: PackageLoadedParam) {
         if (param.packageName != SYSTEM_UI || Application.getProcessName().contains(':')) return
 
+        installPluginDexReadOnlyHook(param)
         runCatching {
             val appClass = param.defaultClassLoader.loadClass("android.app.Application")
             val onCreate = appClass.getDeclaredMethod("onCreate")
@@ -50,6 +54,36 @@ class LrclibXposedModule : XposedModule() {
             Log.i(TAG, "Application.onCreate hook installed")
         }.onFailure { error ->
             Log.e(TAG, "Could not install SystemUI lifecycle hook", error)
+        }
+    }
+
+    /** Make HyperLyric's materialized plugin archive read-only before ART loads its DEX. */
+    private fun installPluginDexReadOnlyHook(param: PackageLoadedParam) {
+        runCatching {
+            val baseDexClassLoader = Class.forName(
+                "dalvik.system.BaseDexClassLoader",
+                false,
+                param.defaultClassLoader,
+            )
+            baseDexClassLoader.declaredConstructors.forEach { constructor ->
+                deoptimize(constructor)
+                hook(constructor).intercept(object : Hooker {
+                    override fun intercept(chain: Chain): Any? {
+                        chain.args.filterIsInstance<String>()
+                            .firstOrNull { it.contains("hyperlyric_plugin_dex") }
+                            ?.let { path ->
+                                val archive = File(path)
+                                if (archive.exists() && archive.setReadOnly()) {
+                                    Log.i(TAG, "Marked HyperLyric plugin archive read-only before ART load")
+                                }
+                            }
+                        return chain.proceed()
+                    }
+                })
+            }
+            Log.i(TAG, "HyperLyric plugin DEX compatibility hook installed")
+        }.onFailure { error ->
+            Log.e(TAG, "Could not install plugin DEX compatibility hook", error)
         }
     }
 
@@ -71,9 +105,57 @@ class LrclibXposedModule : XposedModule() {
                 processName = Application.getProcessName(),
                 centralPackageName = SYSTEM_UI,
             )
-            provider.register()
-            YtMusicLyricsBridge(app, provider).start()
-            Log.i(TAG, "Lyricon provider registered; YT Music MediaSession monitor started")
+            val registrationHandler = Handler(Looper.getMainLooper())
+            val registrationAttempts = AtomicInteger(0)
+            fun retryRegistration(reason: String) {
+                if (provider.service.isActive) return
+                val attempt = registrationAttempts.incrementAndGet()
+                if (attempt > MAX_REGISTRATION_ATTEMPTS) {
+                    Log.e(TAG, "Lyricon registration abandoned after $MAX_REGISTRATION_ATTEMPTS attempts")
+                    return
+                }
+                val started = provider.register()
+                Log.i(
+                    TAG,
+                    "Lyricon registration retry#$attempt reason=$reason started=$started " +
+                        "active=${provider.service.isActive}",
+                )
+            }
+            provider.service.addConnectionListener(object : ConnectionListener {
+                override fun onConnected(provider: LyriconProvider) {
+                    Log.i(TAG, "Lyricon connection established")
+                }
+
+                override fun onReconnected(provider: LyriconProvider) {
+                    Log.i(TAG, "Lyricon connection re-established")
+                }
+
+                override fun onDisconnected(provider: LyriconProvider) {
+                    Log.w(TAG, "Lyricon connection lost")
+                }
+
+                override fun onConnectTimeout(provider: LyriconProvider) {
+                    Log.e(TAG, "Lyricon connection timed out")
+                    registrationHandler.postDelayed({ retryRegistration("timeout") }, 250L)
+                }
+            })
+            val bridge = YtMusicLyricsBridge(app, provider)
+            provider.service.addConnectionListener(object : ConnectionListener {
+                override fun onConnected(provider: LyriconProvider) = bridge.start()
+                override fun onReconnected(provider: LyriconProvider) = bridge.start()
+                override fun onDisconnected(provider: LyriconProvider) = Unit
+                override fun onConnectTimeout(provider: LyriconProvider) = Unit
+            })
+            val registrationStarted = provider.register()
+            Log.i(
+                TAG,
+                "Lyricon provider registration started=$registrationStarted, " +
+                    "active=${provider.service.isActive}; waiting for connection"
+            )
+            // Lyricon Core and this module are both initialized from Application.onCreate.
+            // Retry after Core has registered its bridge receiver in case our first broadcast
+            // wins the startup race.
+            registrationHandler.postDelayed({ retryRegistration("startup") }, 750L)
         }.onFailure { error ->
             initialized.set(false)
             Log.e(TAG, "SystemUI initialization failed", error)
@@ -85,6 +167,7 @@ class LrclibXposedModule : XposedModule() {
         const val SYSTEM_UI = "com.android.systemui"
         const val YT_MUSIC = "com.google.android.apps.youtube.music"
         const val MODULE_PACKAGE = "com.lance.ytmusichyperlyric.xposed"
+        const val MAX_REGISTRATION_ATTEMPTS = 5
         val initialized = java.util.concurrent.atomic.AtomicBoolean(false)
     }
 }
@@ -205,14 +288,23 @@ private class YtMusicLyricsBridge(
         controller: MediaController,
     ) {
         if (request != sequence.get() || key != currentKey || controller.sessionToken != activeToken) return
-        provider.player.setSong(Song(id = key, name = title, artist = artist, duration = duration, lyrics = lines))
+        val accepted = provider.player.setSong(
+            Song(id = key, name = title, artist = artist, duration = duration, lyrics = lines)
+        )
         controller.playbackState?.let(::publishPlayback)
-        Log.i(LrclibXposedModule.TAG, "Published ${lines.size} LRCLIB lines: $title — $artist")
+        Log.i(
+            LrclibXposedModule.TAG,
+            "Published ${lines.size} LRCLIB lines: $title — $artist; " +
+                "accepted=$accepted active=${provider.service.isActive}"
+        )
     }
 
     private fun publishPlayback(state: PlaybackState) {
-        provider.player.setPlaybackState(state.state == PlaybackState.STATE_PLAYING)
-        state.position.takeIf { it >= 0 }?.let(provider.player::setPosition)
+        // Keep Lyricon's automatic playback-state synchronization enabled. Passing only the
+        // boolean state and a point-in-time position switches CachedRemotePlayer to manual mode,
+        // which stops advancing the timeline when no new MediaSession callback arrives (for
+        // example after YT Music goes to the background).
+        provider.player.setPlaybackState(state)
     }
 }
 

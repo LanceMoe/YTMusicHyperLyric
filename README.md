@@ -207,7 +207,7 @@ cd YTMusicHyperLyric
 
 编译生成的 APK 位于：
 - Debug：`Modules/xposed-lrclib/build/outputs/apk/debug/xposed-lrclib-debug.apk`
-- Release：`Modules/xposed-lrclib/build/outputs/apk/release/xposed-lrclib-release-unsigned.apk`
+- Release：`Modules/xposed-lrclib/build/outputs/apk/release/xposed-lrclib-release.apk`
 
 ### GitHub Actions
 

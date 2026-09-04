@@ -21,6 +21,10 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = false
+            // The repository does not contain a private release keystore yet.
+            // Use the Android debug keystore so assembleRelease produces an
+            // installable APK instead of an unsigned APK.
+            signingConfig = signingConfigs.getByName("debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",

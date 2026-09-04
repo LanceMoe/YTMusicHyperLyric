@@ -1,0 +1,421 @@
+# 项目计划：HyperLyric LRCLIB 歌词功能插件
+
+## 0. 架构定性
+
+本仓库开发的是 HyperLyric 的“功能插件”，不是直接交给 LSPosed 管理的传统 Xposed 模块 APK。
+
+两层架构如下：
+
+~~~text
+HyperLyric 宿主 APK
+  ├─ 本身是 Xposed/LSPosed 模块
+  ├─ Hook SystemUI
+  ├─ 管理播放器与歌词源
+  └─ 加载功能插件 ZIP
+       └─ 本仓库的 LRCLIB 插件
+~~~
+
+HyperLyric 的当前 Plugin API 在 SystemUI 进程中接收只读 PluginSong，插件返回 PluginSongResult。插件不得依赖宿主 :app、Song、Renderer、Canvas、View、MediaSession、Context 或 Xposed 对象。
+
+因此本仓库不负责：
+
+- 创建 META-INF/xposed/module.prop、java_init.list 或 scope.list；
+- 直接 Hook YouTube Music；
+- 直接监听 YouTube Music 的 MediaSession；
+- 通过 Lyricon/自定义 IPC 主动发送歌词；
+- 直接刷新 HyperLyric UI。
+
+如果以后要为独立 App 增加新的媒体监听或在线歌词源，应另行设计 LyricSourceExtension，不能把当前 Processor API 当作独立歌词源接口。
+
+## 一、目标
+
+给 HyperLyric 增加一个稳定、低依赖的 LRCLIB 同步歌词提供器：
+
+~~~text
+播放器与歌词源由 HyperLyric 宿主处理
+        ↓
+PluginSong + PluginProcessingContext.mediaInfo
+        ↓
+LRCLIB 查询
+        ↓
+LRC 时间轴解析
+        ↓
+PluginSongResult(REPLACE)
+        ↓
+HyperLyric 校验、合并与显示
+~~~
+
+第一版目标：
+
+- 支持 HyperLyric 当前支持的 Android 13+ 环境；
+- 优先服务 YouTube Music 场景，但不在插件中硬编码播放器 Hook；
+- 使用 LRCLIB 的 syncedLyrics；
+- 只在结果完整且时间轴合法时替换歌词；
+- 查询失败、未命中、超时、解析失败或任务取消时保留原歌词；
+- 插件最终交付为 HyperLyric 插件 ZIP，不是 LSPosed 安装 APK。
+
+## 二、Plugin API 约束
+
+处理器在 onLoad 中注册：
+
+~~~kotlin
+class LrclibPlugin : HyperLyricPlugin {
+    override fun onLoad(context: PluginContext) {
+        context.registerExtension(LrclibProcessor(context))
+    }
+}
+~~~
+
+处理器属性：
+
+~~~kotlin
+override val id = "lrclib"
+override val stage = PluginProcessorStage.LYRIC_REPLACEMENT
+~~~
+
+歌词命中时：
+
+~~~kotlin
+PluginSongResult(
+    song = song.copy(lyrics = lines),
+    changedFields = setOf(PluginSongField.LYRICS),
+    lyricsUpdateMode = PluginLyricsUpdateMode.REPLACE,
+)
+~~~
+
+注意：
+
+- REPLACE 可以改变行数和时间轴；
+- PATCH 才要求行数和索引保持不变；
+- REPLACE 结果不需要通过 changedLyricFields 声明逐字段修改；
+- 输入对象只读，必须使用 copy 创建结果；
+- 没有可靠结果时返回 null；
+- 宿主负责最终校验和防止旧歌曲结果写回新歌曲。
+
+## 三、当前仓库状态
+
+以下内容已经完成：
+
+1. Gradle Kotlin DSL 项目骨架；
+2. Plugins/api 本地 API 模块，插件通过 compileOnly 依赖；
+3. plugins:lrclib Android 插件模块；
+4. 公共无参入口类 LrclibPlugin；
+5. LYRIC_REPLACEMENT 阶段的 LrclibProcessor；
+6. LRCLIB HTTPS 请求、超时和 HTTP 异常处理；
+7. LRC 时间戳解析，支持 [mm:ss]、[mm:ss.xx]、[mm:ss.xxx]、同一行多个时间戳和全局 offset；
+8. 保守的标题候选标准化，保留 raw title 并尝试移除明显发行标记；
+9. PluginCache 成功结果缓存；
+10. Manifest 设置：启用开关和 HTTPS API 地址；
+11. Debug/Release/R8 ZIP 打包任务；
+12. LRC Parser 和标题标准化单元测试；
+13. Gradle Wrapper。
+
+## 四、LRCLIB 第一版
+
+### 4.1 查询
+
+默认接口：
+
+~~~text
+https://lrclib.net/api/get
+~~~
+
+参数：
+
+~~~text
+track_name
+artist_name
+album_name       可选
+duration         可选，秒
+~~~
+
+查询数据优先级：
+
+~~~text
+mediaInfo.title  → song.name
+mediaInfo.artist → song.artist
+mediaInfo.album  → song.album
+mediaInfo.duration → song.duration
+~~~
+
+第一版只接受 syncedLyrics。即使存在 plainLyrics，没有可靠时间轴也返回 null，不使用虚构时间轴替换原歌词。
+
+### 4.2 请求策略
+
+- 使用 Android 平台 HttpURLConnection，避免新增网络库；
+- connect timeout：5 秒；
+- read timeout：10 秒；
+- 单次处理总预算：30 秒；
+- 设置 User-Agent 和 Accept: application/json；
+- 非 2xx、网络异常、JSON 异常均返回 null；
+- 响应正文限制大小，避免异常服务端数据占用过多内存；
+- 请求前后检查线程中断。
+
+## 五、歌词模型与解析
+
+第一版数据流：
+
+~~~text
+LRCLIB JSON
+  ↓
+LRC Parser
+  ↓
+PluginLyricLine
+  ↓
+PluginSongResult
+~~~
+
+第一版不生成逐字 PluginWord，因为 LRC 行级时间戳不包含可靠的词级时间轴。
+
+每行必须满足宿主约束：
+
+~~~text
+begin >= 0
+end > begin
+duration == end - begin
+行按 begin 非递减排列
+text 非空或 words 非空
+~~~
+
+下一行时间戳作为当前行 end。最后一行：
+
+- 优先使用当前歌曲有效时长；
+- 没有有效歌曲时长则使用 begin + 5000ms；
+- 始终保证 end > begin。
+
+需要忽略 LRC metadata 行：
+
+~~~text
+[ar:]
+[ti:]
+[al:]
+[by:]
+[offset:]
+~~~
+
+全局 offset 已在解析阶段统一应用，最终仍必须通过宿主时间轴校验。
+
+## 六、缓存
+
+使用 PluginContext.cache，禁止直接访问文件、SharedPreferences 或宿主 Context。
+
+当前策略：
+
+- 只缓存成功取得的 syncedLyrics 正文；
+- key 使用标题、歌手、专辑、时长的 SHA-256；
+- 缓存命中后直接解析，不发起网络请求；
+- 缓存内容损坏或无法解析时删除当前条目并回退网络；
+- 网络失败不缓存；
+- 缓存失败不能影响宿主原歌词。
+
+待增强：
+
+- 成功歌词 TTL，建议 30 天；
+- “确认无歌词”负缓存，建议 24 小时；
+- 缓存版本和更新时间；
+- 可选 cacheScopes 与 PluginCacheExtension，供 HyperLyric 管理缓存。
+
+## 七、生命周期、取消与并发
+
+插件处理函数是宿主调用的单次处理入口，不自行维护播放器监听或 Lyricon 发送任务。
+
+要求：
+
+- onLoad 只创建状态并注册扩展；
+- 播放相关处理放在 processResult；
+- onUnload 释放插件自有资源；
+- processResult 前检查插件开关、线程中断和输入字段；
+- 网络请求使用短超时；
+- 捕获 InterruptedException 后恢复中断标记并返回 null；
+- 不保存宿主 PluginSong 或内部对象引用；
+- 迟到结果由宿主生命周期和歌曲快照机制丢弃。
+
+插件内部暂不使用 currentJob/currentTrackKey 管理全局任务。只有将来插件内部需要并发执行多个独立 Provider 时，才考虑引入可取消的 CoroutineScope；仍需服从宿主处理超时和取消语义。
+
+## 八、标题、歌手与时长匹配
+
+当前版本优先使用宿主提供的原始标题查询；若未命中，再尝试保守移除明显发行标记后的标题。当前仍不做搜索候选打分。
+
+待增强：
+
+- 同时保留 raw title 和 normalized title；
+- 去除 Official Audio、Official Video、Music Video 等明显发行标记；
+- 不无脑删除 feat.、live、remix、acoustic、TV size 等版本信息；
+- 增加 LRCLIB search fallback；
+- 对候选标题、歌手、专辑和时长进行匹配评分；
+- 时长差异较大时拒绝候选，避免翻唱、Live 或不同版本误匹配。
+
+## 九、后续 Provider
+
+在 LRCLIB 逻辑稳定后，再引入统一 Provider 抽象：
+
+~~~kotlin
+interface LyricsProvider {
+    fun getLyrics(track: TrackInfo): LyricsResult?
+}
+~~~
+
+建议顺序：
+
+~~~text
+1. LRCLIB
+2. 网易云音乐
+3. 酷狗音乐
+~~~
+
+每个 Provider 必须独立封装查询、响应解析和匹配逻辑。Provider 不直接依赖 HyperLyric 宿主类型；统一模型转换和 PluginSongResult 构造应位于适配层。
+
+在增加第二个 Provider 之前，先把当前 LrclibClient 和 LrcParser 重构到统一内部模型，避免多个来源直接拼装 PluginLyricLine。
+
+## 十、设置与日志
+
+设置全部声明在 src/main/plugin/manifest.json，由 HyperLyric 宿主生成设置页面。插件不创建 Compose/Miuix 页面。
+
+第一版设置：
+
+~~~text
+enabled       默认 false
+api_endpoint  默认 https://lrclib.net/api/get，仅允许 HTTPS
+~~~
+
+日志通过 PluginLogger 输出，不直接写 Android Log 或自定义文件。
+
+至少记录：
+
+- 生命周期；
+- 当前歌曲是否缺少标题/歌手；
+- 缓存命中；
+- LRCLIB 请求失败原因和 HTTP 状态；
+- 歌词命中与行数；
+- LRC 解析失败；
+- 处理取消和异常。
+
+不要输出完整歌词正文、API 响应或过大的调试数据。
+
+## 十一、真机调试流程
+
+### 11.1 构建
+
+~~~powershell
+.\gradlew.bat :plugins:lrclib:test
+.\gradlew.bat :plugins:lrclib:packageDebugPlugin --max-workers=2
+~~~
+
+### 11.2 安装
+
+将生成的 Debug ZIP 传到设备，在 HyperLyric 中执行：
+
+~~~text
+插件管理 → 安装插件包 → 选择 ZIP → 打开 LRCLIB 插件
+~~~
+
+不能使用 adb install 安装该 ZIP，也不需要在 LSPosed 中单独添加该插件。
+
+安装、卸载或代码更新后重启 SystemUI；启用/停用和普通配置修改无需重启。当前歌曲不会因为配置变化自动重跑，测试时需要切换歌曲。
+
+### 11.3 日志
+
+~~~powershell
+adb logcat -c
+adb logcat -v time | Select-String -Pattern "HyperLyric|Lrclib|Xposed|LSPosed"
+~~~
+
+Debug ZIP 的主要调试手段是 PluginLogger + Logcat。插件代码运行在 SystemUI 进程中，不像普通 APK 一样由插件 APK 自己启动。
+
+## 十二、验收标准
+
+### 12.1 构建验收
+
+- :plugins:lrclib:test 通过；
+- Debug ZIP 可以生成；
+- Release/R8 ZIP 可以生成；
+- ZIP 只包含 manifest.json 和 classes*.dex；
+- ZIP 不包含重复的 Plugins/api；
+- Release 入口类仍能按 Manifest 二进制名加载。
+
+### 12.2 功能验收
+
+~~~text
+HyperLyric 宿主
+  ↓
+收到 PluginSong
+  ↓
+LRCLIB 返回 syncedLyrics
+  ↓
+LRC Parser 生成合法行级时间轴
+  ↓
+返回 PluginSongResult(REPLACE)
+  ↓
+HyperLyric 正确显示同步歌词
+~~~
+
+必须验证：
+
+- 标题、歌手缺失时安全跳过；
+- LRCLIB 未命中时原歌词保持不变；
+- 网络失败、超时和 JSON 错误不导致 SystemUI/播放器崩溃；
+- 缓存命中时不重复访问网络；
+- 缓存损坏时删除并回退；
+- 无同步歌词时不使用纯文本伪造时间轴；
+- 快速切歌时旧处理不会污染新歌曲；
+- 普通配置修改在下一次处理生效；
+- 安装/更新插件后重启 SystemUI 才加载新代码。
+
+## 十三、开发阶段
+
+### Phase 0：架构修正（已完成）
+
+- 明确 HyperLyric Xposed 宿主 APK 与功能插件 ZIP 的边界；
+- 删除独立 Xposed Hook、MediaSession 监听和 Lyricon IPC 作为本仓库目标的表述。
+
+### Phase 1：插件骨架（已完成）
+
+- Gradle 项目与 Wrapper；
+- Plugins/api；
+- plugins:lrclib 模块；
+- Manifest、入口、R8 规则和 ZIP 打包任务。
+
+### Phase 2：LRCLIB MVP（已完成基础版本）
+
+- LRCLIB client；
+- LRC parser；
+- PluginSongResult(REPLACE)；
+- PluginCache；
+- 单元测试。
+
+### Phase 3：真机验证（下一阶段）
+
+- 在 HyperLyric 插件管理中安装 Debug ZIP；
+- 验证插件加载、启用和配置变更；
+- 使用 YouTube Music 播放歌曲并切歌；
+- 验证命中、未命中、缓存和异常回退；
+- 检查 SystemUI 日志与同步显示效果。
+
+### Phase 4：匹配质量与缓存增强
+
+- 更完整的标题/歌手标准化；
+- LRCLIB search fallback；
+- 候选评分和时长校验；
+- TTL、负缓存、缓存管理扩展。
+
+### Phase 5：更多歌词源
+
+- 统一内部歌词模型；
+- LyricsRepository；
+- 网易云 Provider；
+- 酷狗 Provider；
+- 保持 Provider 与 HyperLyric API 解耦。
+
+## 十四、独立 Xposed APK 的另行计划
+
+只有当目标改为“独立、不依赖 HyperLyric Plugin Runtime 的 Xposed 模块”时，才新增单独模块：
+
+~~~text
+app/
+└── src/main/resources/META-INF/xposed/
+    ├── module.prop
+    ├── java_init.list
+    └── scope.list
+~~~
+
+该模块需要自行处理 Xposed 入口、SystemUI/播放器数据获取、歌词输出和兼容性；它与当前 plugins:lrclib ZIP 插件是两种不同交付物，不在本计划范围内。

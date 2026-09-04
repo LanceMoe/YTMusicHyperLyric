@@ -1,0 +1,45 @@
+{
+  "id": "hyperlyric.lrclib",
+  "name": "LRCLIB 同步歌词",
+  "nameLocales": {
+    "en": "LRCLIB Synced Lyrics"
+  },
+  "summary": "从 LRCLIB 获取同步歌词，未命中或无可靠时间轴时保持当前歌词源",
+  "summaryLocales": {
+    "en": "Fetch synced lyrics from LRCLIB and keep the current source on a miss or invalid timeline"
+  },
+  "author": "YTMusicHyperLyric",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "entry": "com.lance.ytmusichyperlyric.plugin.lrclib.LrclibPlugin",
+  "activationSettingKey": "enabled",
+  "settings": [
+    {
+      "type": "switch",
+      "key": "enabled",
+      "title": "LRCLIB 同步歌词",
+      "titleLocales": {
+        "en": "LRCLIB Synced Lyrics"
+      },
+      "summary": "使用 LRCLIB 的同步歌词替换当前歌词",
+      "summaryLocales": {
+        "en": "Replace the current lyrics with synced lyrics from LRCLIB"
+      },
+      "default": false
+    },
+    {
+      "type": "text",
+      "key": "api_endpoint",
+      "title": "API 地址",
+      "titleLocales": {
+        "en": "API endpoint"
+      },
+      "summary": "默认使用 https://lrclib.net/api/get",
+      "summaryLocales": {
+        "en": "Defaults to https://lrclib.net/api/get"
+      },
+      "default": "https://lrclib.net/api/get",
+      "inputType": "uri"
+    }
+  ]
+}

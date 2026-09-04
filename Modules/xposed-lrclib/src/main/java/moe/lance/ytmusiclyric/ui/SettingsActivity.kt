@@ -2,6 +2,7 @@ package moe.lance.ytmusiclyric.ui
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
@@ -14,6 +15,7 @@ import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowInsets
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -33,6 +35,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 class SettingsActivity : Activity() {
 
@@ -238,7 +241,61 @@ class SettingsActivity : Activity() {
         container.addView(carCard)
         addDivider(container)
 
-        // 2. Local Lyric Cache Management Card
+        // 2. Module and SystemUI actions
+        val systemCard = createCard().apply {
+            val sectionTitle = TextView(this@SettingsActivity).apply {
+                text = "🛠 模块与系统操作"
+                setTextColor(Color.parseColor("#FFCC80"))
+                textSize = 16f
+                typeface = Typeface.DEFAULT_BOLD
+            }
+            addView(sectionTitle)
+
+            val hideIconSwitch = Switch(this@SettingsActivity).apply {
+                text = "隐藏桌面图标"
+                setTextColor(Color.WHITE)
+                textSize = 15f
+                isChecked = prefs.getBoolean(CarBluetoothLyricConfig.KEY_HIDE_LAUNCHER_ICON, false)
+                setOnCheckedChangeListener { _, hide ->
+                    prefs.edit().putBoolean(CarBluetoothLyricConfig.KEY_HIDE_LAUNCHER_ICON, hide).apply()
+                    setLauncherIconVisible(!hide)
+                    Toast.makeText(
+                        this@SettingsActivity,
+                        if (hide) "桌面图标已隐藏，可从 LSPosed 模块设置重新打开" else "桌面图标已显示",
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            }
+            addView(hideIconSwitch)
+
+            val iconHint = TextView(this@SettingsActivity).apply {
+                text = "只隐藏桌面入口，不影响 LSPosed 模块运行；隐藏后仍可从 LSPosed 的模块设置进入本页面。"
+                setTextColor(Color.parseColor("#757575"))
+                textSize = 12f
+                setPadding(0, dp(2), 0, dp(12))
+            }
+            addView(iconHint)
+
+            val restartStatus = TextView(this@SettingsActivity).apply {
+                text = "重启 SystemUI 需要设备已授权 root。重启期间状态栏和导航栏可能短暂消失。"
+                setTextColor(Color.parseColor("#9E9E9E"))
+                textSize = 12f
+                setPadding(0, 0, 0, dp(6))
+            }
+            addView(restartStatus)
+
+            val restartButton = Button(this@SettingsActivity).apply {
+                text = "快速重启 SystemUI"
+                setTextColor(Color.WHITE)
+                setBackgroundColor(Color.parseColor("#8D6E63"))
+                setOnClickListener { restartSystemUi(this, restartStatus) }
+            }
+            addView(restartButton)
+        }
+        container.addView(systemCard)
+        addDivider(container)
+
+        // 3. Local Lyric Cache Management Card
         val cacheCard = createCard().apply {
             val headerRow = LinearLayout(this@SettingsActivity).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -323,7 +380,7 @@ class SettingsActivity : Activity() {
         container.addView(cacheCard)
         addDivider(container)
 
-        // 3. Test Lyric Search Card
+        // 4. Test Lyric Search Card
         val testCard = createCard().apply {
             val sectionTitle = TextView(this@SettingsActivity).apply {
                 text = "🔍 歌词三源检索即时测试"
@@ -403,7 +460,7 @@ class SettingsActivity : Activity() {
         container.addView(testCard)
         addDivider(container)
 
-        // 4. Status Card (Scope Guide)
+        // 5. Status Card (Scope Guide)
         val statusCard = createCard().apply {
             val scopeTitle = TextView(this@SettingsActivity).apply {
                 text = "📌 LSPosed 作用域配置指引"
@@ -424,7 +481,9 @@ class SettingsActivity : Activity() {
         }
         container.addView(statusCard)
 
+        applyWindowInsets(root, container)
         setContentView(root)
+        root.requestApplyInsets()
         loadCacheList()
     }
 
@@ -606,6 +665,53 @@ class SettingsActivity : Activity() {
             }
             .setNegativeButton("取消", null)
             .show()
+    }
+
+    private fun setLauncherIconVisible(visible: Boolean) {
+        val launcherComponent = ComponentName(this, "$packageName.ui.SettingsLauncher")
+        packageManager.setComponentEnabledSetting(
+            launcherComponent,
+            if (visible) {
+                android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+            } else {
+                android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+            },
+            android.content.pm.PackageManager.DONT_KILL_APP,
+        )
+    }
+
+    private fun restartSystemUi(button: Button, status: TextView) {
+        button.isEnabled = false
+        status.setTextColor(Color.parseColor("#FFCC80"))
+        status.text = "正在请求 root 并重启 SystemUI..."
+        bgExecutor.execute {
+            val result = runCatching {
+                val process = Runtime.getRuntime().exec(arrayOf("su", "-c", "killall -TERM com.android.systemui"))
+                if (!process.waitFor(8L, TimeUnit.SECONDS)) {
+                    process.destroyForcibly()
+                    error("root 命令超时")
+                }
+                if (process.exitValue() != 0) error("root 命令返回 ${process.exitValue()}")
+            }
+            mainHandler.post {
+                button.isEnabled = true
+                if (result.isSuccess) {
+                    status.setTextColor(Color.parseColor("#A5D6A7"))
+                    status.text = "SystemUI 重启命令已执行，状态栏通常会在几秒内恢复。"
+                } else {
+                    status.setTextColor(Color.parseColor("#EF9A9A"))
+                    status.text = "重启失败：${result.exceptionOrNull()?.message ?: "未获得 root 权限"}"
+                }
+            }
+        }
+    }
+
+    private fun applyWindowInsets(root: View, container: View) {
+        root.setOnApplyWindowInsetsListener { _, insets ->
+            val bars = insets.getInsets(WindowInsets.Type.systemBars())
+            container.setPadding(dp(18), dp(32) + bars.top, dp(18), dp(40) + bars.bottom)
+            insets
+        }
     }
 
     private fun createCard(): LinearLayout {

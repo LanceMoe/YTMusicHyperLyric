@@ -27,6 +27,7 @@ data class CarBluetoothLyricConfig(
         const val KEY_ONLY_BLUETOOTH = "pref_only_bluetooth"
         const val KEY_DISPLAY_MODE = "pref_display_mode"
         const val KEY_OFFSET_MS = "pref_offset_ms"
+        const val KEY_HIDE_LAUNCHER_ICON = "pref_hide_launcher_icon"
 
         fun fromPreferences(prefs: SharedPreferences?): CarBluetoothLyricConfig {
             if (prefs == null) return CarBluetoothLyricConfig()
@@ -41,4 +42,3 @@ data class CarBluetoothLyricConfig(
         }
     }
 }
-

@@ -11,16 +11,33 @@
         <activity
             android:name="moe.lance.ytmusiclyric.ui.SettingsActivity"
             android:label="YouTube Music HyperLyric"
+            android:exported="true" />
+
+        <!-- Keep this component enabled: LSPosed can always use it after the launcher is hidden. -->
+        <activity
+            android:name="moe.lance.ytmusiclyric.ui.ModuleSettingsActivity"
+            android:label="YouTube Music HyperLyric 设置"
             android:exported="true">
             <intent-filter>
+                <!-- LSPosed resolves MAIN + MODULE_SETTINGS before trying the launcher. -->
                 <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-            <intent-filter>
                 <action android:name="android.intent.action.APPLICATION_PREFERENCES" />
                 <category android:name="de.robv.android.xposed.category.MODULE_SETTINGS" />
             </intent-filter>
         </activity>
+
+        <!-- Separate launcher entry lets the desktop icon be hidden without hiding LSPosed settings. -->
+        <activity-alias
+            android:name="moe.lance.ytmusiclyric.ui.SettingsLauncher"
+            android:label="YouTube Music HyperLyric"
+            android:enabled="true"
+            android:exported="true"
+            android:targetActivity="moe.lance.ytmusiclyric.ui.SettingsActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
 
         <activity
             android:name="moe.lance.ytmusiclyric.ui.LyricDetailActivity"

@@ -1,5 +1,6 @@
 plugins {
     id("com.android.application")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
@@ -7,11 +8,11 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "moe.lance.ytmusiclyric"
+        applicationId = "moe.lance.ytmusiclrc"
         minSdk = 33
         targetSdk = 37
         versionCode = 1
-        versionName = "0.2.0"
+        versionName = "0.3.0"
     }
 
     buildTypes {
@@ -37,6 +38,18 @@ android {
             isReturnDefaultValues = true
         }
     }
+
+    buildFeatures {
+        compose = true
+    }
+}
+
+androidComponents {
+    onVariants { variant ->
+        variant.outputs.forEach { output ->
+            output.outputFileName.set("ytmusiclrc-${variant.name}.apk")
+        }
+    }
 }
 
 dependencies {
@@ -46,6 +59,11 @@ dependencies {
     // Formal Lyricon provider protocol used by HyperLyric's SystemUI source.
     implementation("io.github.proify.lyricon:provider:0.1.70")
     implementation("org.jetbrains.kotlin:kotlin-stdlib:2.3.21")
+
+    // Miuix provides the Compose-native visual language used by the settings screens.
+    implementation("top.yukonga.miuix.kmp:miuix-ui-android:0.9.1")
+    implementation("top.yukonga.miuix.kmp:miuix-preference-android:0.9.1")
+    implementation("androidx.activity:activity-compose:1.12.0")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")

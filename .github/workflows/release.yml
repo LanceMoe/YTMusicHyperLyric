@@ -107,8 +107,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release-assets
-          cp "Modules/xposed-lrclib/build/outputs/apk/release/xposed-lrclib-release.apk" \
-            "release-assets/xposed-lrclib-${TAG}.apk"
+          cp "Modules/xposed-lrclib/build/outputs/apk/release/ytmusiclrc-release.apk" \
+            "release-assets/ytmusiclrc-${TAG}.apk"
           cp "Plugins/modules/lrclib/build/outputs/plugin/hyperlyric-lrclib-plugin.zip" \
             "release-assets/hyperlyric-lrclib-plugin-${TAG}.zip"
           sha256sum release-assets/* > release-assets/SHA256SUMS.txt

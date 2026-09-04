@@ -109,7 +109,7 @@ class LyricsCacheProvider : ContentProvider() {
         )
     }
 
-    override fun getType(uri: Uri): String = "vnd.android.cursor.dir/moe.lance.ytmusiclyric.cache"
+    override fun getType(uri: Uri): String = "vnd.android.cursor.dir/moe.lance.ytmusiclrc.cache"
 
     override fun insert(uri: Uri, values: ContentValues?): Uri? {
         val v = values ?: return null
@@ -126,7 +126,7 @@ class LyricsCacheProvider : ContentProvider() {
     }
 
     companion object {
-        const val AUTHORITY = "moe.lance.ytmusiclyric.cache"
+        const val AUTHORITY = "moe.lance.ytmusiclrc.cache"
         val CONTENT_URI: Uri = Uri.parse("content://$AUTHORITY")
 
         const val METHOD_GET_LYRIC = "getLyric"
@@ -148,4 +148,3 @@ class LyricsCacheProvider : ContentProvider() {
         const val EXTRA_UPDATED_AT = "updated_at"
     }
 }
-

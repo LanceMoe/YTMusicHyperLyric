@@ -122,13 +122,13 @@ flowchart TD
 
 ### 第一步：获取与安装模块
 
-1. 从 [Releases](../../releases) 下载最新的 `xposed-lrclib-release.apk`（或自行编译）；
+1. 从 [Releases](../../releases) 下载最新的 `ytmusiclrc-<版本>.apk`（或自行编译）；
 2. 在设备上正常安装该 APK。
 
 ### 第二步：配置 LSPosed 作用域
 
 1. 打开 **LSPosed** 管理器；
-2. 在模块列表中找到 **YouTube Music HyperLyric**（包名：`moe.lance.ytmusiclyric`）并启用；
+2. 在模块列表中找到 **YouTube Music HyperLyric**（包名：`moe.lance.ytmusiclrc`）并启用；
 3. **作用域配置 (根据需求按需勾选)**：
    - ✅ **系统界面 (`System UI` / `com.android.systemui`)**：用于接入 HyperLyric 状态栏/灵动岛焦点胶囊歌词；
    - ✅ **YouTube Music (`com.google.android.apps.youtube.music`)**：用于**车载蓝牙显示歌词** (通过 AVRCP 协议向汽车屏幕推送歌词)；
@@ -207,8 +207,8 @@ cd YTMusicHyperLyric
 ```
 
 编译生成的 APK 位于：
-- Debug：`Modules/xposed-lrclib/build/outputs/apk/debug/xposed-lrclib-debug.apk`
-- Release：`Modules/xposed-lrclib/build/outputs/apk/release/xposed-lrclib-release.apk`
+- Debug：`Modules/xposed-lrclib/build/outputs/apk/debug/ytmusiclrc-debug.apk`
+- Release：`Modules/xposed-lrclib/build/outputs/apk/release/ytmusiclrc-release.apk`
 
 ### GitHub Actions
 

@@ -172,7 +172,7 @@ class LrclibXposedModule : XposedModule() {
         const val TAG = "YTMusicHyperLyric"
         const val SYSTEM_UI = "com.android.systemui"
         const val YT_MUSIC = "com.google.android.apps.youtube.music"
-        const val MODULE_PACKAGE = "moe.lance.ytmusiclyric"
+        const val MODULE_PACKAGE = "moe.lance.ytmusiclrc"
         const val MAX_REGISTRATION_ATTEMPTS = 5
         val initialized = java.util.concurrent.atomic.AtomicBoolean(false)
     }
@@ -192,6 +192,7 @@ private class YtMusicLyricsBridge(
     @Volatile private var activeController: MediaController? = null
     @Volatile private var activeCallback: MediaController.Callback? = null
     @Volatile private var currentKey: String? = null
+    private var pendingZeroDurationRunnable: Runnable? = null
 
     private val sessionListener = MediaSessionManager.OnActiveSessionsChangedListener { controllers ->
         selectController(controllers.orEmpty())
@@ -208,6 +209,8 @@ private class YtMusicLyricsBridge(
         val controller = controllers.firstOrNull { it.packageName == LrclibXposedModule.YT_MUSIC }
         if (controller?.sessionToken == activeToken) return
 
+        pendingZeroDurationRunnable?.let(mainHandler::removeCallbacks)
+        pendingZeroDurationRunnable = null
         activeController?.let { old -> activeCallback?.let(old::unregisterCallback) }
         activeToken = controller?.sessionToken
         activeController = controller
@@ -255,24 +258,43 @@ private class YtMusicLyricsBridge(
         val key = "$title\u0000$artist\u0000$album\u0000$duration"
         if (key == currentKey) return
         currentKey = key
+
+        pendingZeroDurationRunnable?.let(mainHandler::removeCallbacks)
+        pendingZeroDurationRunnable = null
+
         val request = sequence.incrementAndGet()
         provider.player.setSong(null)
 
-        executor.execute {
-            val lines = runCatching {
-                LyricsRepository.getLyrics(title, artist, album, duration, app)
-            }.onFailure { error ->
-                Log.w(LrclibXposedModule.TAG, "Lyric lookup failed for '$title' — '$artist'", error)
-            }.getOrNull()
+        fun dispatchLookup() {
+            executor.execute {
+                val lines = runCatching {
+                    LyricsRepository.getLyrics(title, artist, album, duration, app)
+                }.onFailure { error ->
+                    Log.w(LrclibXposedModule.TAG, "Lyric lookup failed for '$title' — '$artist'", error)
+                }.getOrNull()
 
-            if (lines.isNullOrEmpty()) {
-                Log.i(LrclibXposedModule.TAG, "No timed lyrics found across providers: $title — $artist")
-                return@execute
-            }
+                if (lines.isNullOrEmpty()) {
+                    Log.i(LrclibXposedModule.TAG, "No timed lyrics found across providers: $title — $artist")
+                    return@execute
+                }
 
-            mainHandler.post {
-                publishIfCurrent(request, key, title, artist, duration, lines, controller)
+                mainHandler.post {
+                    publishIfCurrent(request, key, title, artist, duration, lines, controller)
+                }
             }
+        }
+
+        if (duration <= 0L) {
+            val delayedTask = Runnable {
+                pendingZeroDurationRunnable = null
+                if (request == sequence.get() && controller.sessionToken == activeToken) {
+                    dispatchLookup()
+                }
+            }
+            pendingZeroDurationRunnable = delayedTask
+            mainHandler.postDelayed(delayedTask, 350L)
+        } else {
+            dispatchLookup()
         }
     }
 

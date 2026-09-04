@@ -17,6 +17,17 @@ class LyricsCacheTest {
     }
 
     @Test
+    fun testCacheKeyPrefixConsistency() {
+        val zeroDurationKey = LyricsRepository.buildCacheKey("晴天 (Official Video)", "周杰伦 - Topic", 0L)
+        val fullDurationKey = LyricsRepository.buildCacheKey("晴天", "周杰伦", 240_000L)
+        val expectedPrefix = LyricsRepository.buildCacheKeyPrefix("晴天", "周杰伦")
+
+        assertEquals("晴天\u0000周杰伦\u0000", expectedPrefix)
+        assertEquals(expectedPrefix, zeroDurationKey.substringBeforeLast('\u0000') + "\u0000")
+        assertEquals(expectedPrefix, fullDurationKey.substringBeforeLast('\u0000') + "\u0000")
+    }
+
+    @Test
     fun testCacheEntryModel() {
         val entry = LyricsCacheEntry(
             id = 1L,

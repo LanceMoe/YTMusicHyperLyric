@@ -1,4 +1,4 @@
-package com.lance.ytmusichyperlyric.xposed
+package moe.lance.ytmusiclyric
 
 import io.github.proify.lyricon.lyric.model.RichLyricLine
 

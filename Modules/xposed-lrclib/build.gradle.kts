@@ -3,11 +3,11 @@ plugins {
 }
 
 android {
-    namespace = "com.lance.ytmusichyperlyric.xposed"
+    namespace = "moe.lance.ytmusiclyric"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.lance.ytmusichyperlyric.xposed"
+        applicationId = "moe.lance.ytmusiclyric"
         minSdk = 33
         targetSdk = 37
         versionCode = 1

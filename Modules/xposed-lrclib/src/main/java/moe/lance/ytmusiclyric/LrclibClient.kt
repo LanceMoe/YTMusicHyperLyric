@@ -1,4 +1,4 @@
-package com.lance.ytmusichyperlyric.xposed
+package moe.lance.ytmusiclyric
 
 import android.util.Log
 import java.io.IOException

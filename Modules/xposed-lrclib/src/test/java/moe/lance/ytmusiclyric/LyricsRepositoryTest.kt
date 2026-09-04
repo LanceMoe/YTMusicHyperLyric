@@ -1,4 +1,4 @@
-package com.lance.ytmusichyperlyric.xposed
+package moe.lance.ytmusiclyric
 
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue

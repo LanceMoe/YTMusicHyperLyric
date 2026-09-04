@@ -21,7 +21,7 @@
 adb install -r Modules/xposed-lrclib/build/outputs/apk/debug/xposed-lrclib-debug.apk
 ```
 
-在 LSPosed 启用 `YT Music HyperLyric LRCLIB`，作用域只选 `System UI`，然后重启 SystemUI。HyperLyric 本体保持启用并选择「Lyricon」歌词源。
+在 LSPosed 启用 `YouTube Music HyperLyric`，作用域只选 `System UI`，然后重启 SystemUI。HyperLyric 本体保持启用并选择「Lyricon」歌词源。
 
 日志：
 

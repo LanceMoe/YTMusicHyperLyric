@@ -1,4 +1,4 @@
-package com.lance.ytmusichyperlyric.xposed
+package moe.lance.ytmusiclyric
 
 import android.app.Application
 import android.content.Context
@@ -156,7 +156,7 @@ class LrclibXposedModule : XposedModule() {
         const val TAG = "YTMusicHyperLyric"
         const val SYSTEM_UI = "com.android.systemui"
         const val YT_MUSIC = "com.google.android.apps.youtube.music"
-        const val MODULE_PACKAGE = "com.lance.ytmusichyperlyric.xposed"
+        const val MODULE_PACKAGE = "moe.lance.ytmusiclyric"
         const val MAX_REGISTRATION_ATTEMPTS = 5
         val initialized = java.util.concurrent.atomic.AtomicBoolean(false)
     }

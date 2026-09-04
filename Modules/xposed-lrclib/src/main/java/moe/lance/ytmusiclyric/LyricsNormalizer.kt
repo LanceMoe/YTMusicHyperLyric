@@ -1,4 +1,4 @@
-package com.lance.ytmusichyperlyric.xposed
+package moe.lance.ytmusiclyric
 
 /**
  * Normalizes YouTube Music track metadata by stripping video/release annotations,

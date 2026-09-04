@@ -1,4 +1,4 @@
-package com.lance.ytmusichyperlyric.xposed
+package moe.lance.ytmusiclyric
 
 /**
  * Lightweight, zero-dependency Chinese traditional to simplified converter

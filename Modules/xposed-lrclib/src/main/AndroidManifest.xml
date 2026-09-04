@@ -3,6 +3,6 @@
 
     <application
         android:allowBackup="false"
-        android:label="YT Music HyperLyric LRCLIB"
+        android:label="YouTube Music HyperLyric"
         android:theme="@android:style/Theme.Material.NoActionBar" />
 </manifest>

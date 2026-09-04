@@ -1,0 +1,154 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version, for example v1.0.0'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ inputs.version || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Prepare release tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate and prepare tag
+        id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            TAG="$INPUT_VERSION"
+          else
+            TAG="$GITHUB_REF_NAME"
+          fi
+
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release version: $TAG" >&2
+            echo 'Expected a semantic version such as v1.0.0 or v1.0.0-rc.1.' >&2
+            exit 1
+          fi
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+          if [[ "$EVENT_NAME" != "workflow_dispatch" ]]; then
+            exit 0
+          fi
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists; using the existing tag."
+            exit 0
+          fi
+
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git tag --annotate "$TAG" "$COMMIT_SHA" --message "Release $TAG"
+          git push origin "refs/tags/$TAG"
+
+  build:
+    name: Build release assets
+    needs: prepare
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Run unit tests
+        run: |
+          chmod +x ./gradlew
+          ./gradlew test --max-workers=2
+
+      - name: Build release APK and plugin ZIP
+        run: |
+          ./gradlew \
+            :modules:xposed-lrclib:assembleRelease \
+            :plugins:lrclib:packagePlugin \
+            --max-workers=2
+
+      - name: Collect release assets
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          cp "Modules/xposed-lrclib/build/outputs/apk/release/xposed-lrclib-release-unsigned.apk" \
+            "release-assets/xposed-lrclib-${TAG}.apk"
+          cp "Plugins/modules/lrclib/build/outputs/plugin/hyperlyric-lrclib-plugin.zip" \
+            "release-assets/hyperlyric-lrclib-plugin-${TAG}.zip"
+          sha256sum release-assets/* > release-assets/SHA256SUMS.txt
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-${{ needs.prepare.outputs.tag }}
+          path: release-assets/
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          if gh release view "$TAG" --repo "$REPOSITORY" >/dev/null 2>&1; then
+            RELEASE_ID="$(gh release view "$TAG" --repo "$REPOSITORY" --json id --jq '.id')"
+            NOTES_JSON="$RUNNER_TEMP/release-notes.json"
+
+            gh api \
+              --method POST \
+              "repos/$REPOSITORY/releases/generate-notes" \
+              --field tag_name="$TAG" > "$NOTES_JSON"
+
+            jq --arg title "$TAG" \
+              '{name: $title, body: .body, draft: false}' "$NOTES_JSON" |
+              gh api \
+                --method PATCH \
+                "repos/$REPOSITORY/releases/$RELEASE_ID" \
+                --input - >/dev/null
+
+            gh release upload "$TAG" release-assets/* \
+              --repo "$REPOSITORY" --clobber
+          else
+            gh release create "$TAG" release-assets/* \
+              --repo "$REPOSITORY" \
+              --verify-tag \
+              --title "$TAG" \
+              --generate-notes
+          fi

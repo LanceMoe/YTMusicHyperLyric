@@ -200,6 +200,17 @@ cd YTMusicHyperLyric
 - Debug：`Modules/xposed-lrclib/build/outputs/apk/debug/xposed-lrclib-debug.apk`
 - Release：`Modules/xposed-lrclib/build/outputs/apk/release/xposed-lrclib-release-unsigned.apk`
 
+### GitHub Actions
+
+仓库包含以下 CI workflow：
+
+- `CI`：在 `main` 分支 push、Pull Request 或手动运行时执行 `test`，并在失败时保留测试报告；
+- `Release`：支持以下两种发布方式：
+  1. 在 GitHub 创建并 push 一个符合 `v1.0.0` 格式的 tag，workflow 会自动构建并发布；
+  2. 在 Actions 的 `Release` workflow 中点击 **Run workflow**，填写版本号（例如 `v1.0.0`），workflow 会创建 tag、构建并发布。
+
+Release 会自动上传主模块 APK、兼容插件 ZIP 和 `SHA256SUMS.txt`，并使用 GitHub 的生成规则更新 release notes。release 构建失败时不会创建或更新发布内容。
+
 ---
 
 ## 🔍 调试与日志

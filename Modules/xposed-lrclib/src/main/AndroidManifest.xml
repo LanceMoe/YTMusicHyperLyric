@@ -6,7 +6,7 @@
     <application
         android:allowBackup="false"
         android:label="YouTube Music HyperLyric"
-        android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+        android:theme="@style/Theme.HyperLyric">
 
         <activity
             android:name="moe.lance.ytmusiclyric.ui.SettingsActivity"

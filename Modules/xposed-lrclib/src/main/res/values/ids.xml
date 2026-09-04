@@ -1,0 +1,8 @@
+<resources>
+    <item name="settings_scroll" type="id" />
+    <item name="cache_search" type="id" />
+    <item name="test_title" type="id" />
+    <item name="test_artist" type="id" />
+    <item name="test_result" type="id" />
+    <item name="custom_shift" type="id" />
+</resources>

@@ -1,0 +1,11 @@
+<resources>
+    <style name="Theme.HyperLyric" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">@color/hyper_primary</item>
+        <item name="android:windowBackground">@color/hyper_background</item>
+        <item name="android:colorBackground">@color/hyper_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:windowActionModeOverlay">true</item>
+    </style>
+</resources>

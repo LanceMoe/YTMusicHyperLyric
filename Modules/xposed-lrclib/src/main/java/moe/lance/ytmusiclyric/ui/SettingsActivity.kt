@@ -5,30 +5,21 @@ import android.app.AlertDialog
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.graphics.Color
-import android.graphics.Typeface
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.text.Editable
 import android.text.TextWatcher
-import android.view.Gravity
-import android.view.View
-import android.view.ViewGroup
-import android.view.WindowInsets
+import android.text.TextUtils
 import android.widget.Button
-import android.widget.EditText
 import android.widget.LinearLayout
-import android.widget.RadioButton
-import android.widget.RadioGroup
-import android.widget.ScrollView
-import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import moe.lance.ytmusiclyric.CarBluetoothLyricConfig
 import moe.lance.ytmusiclyric.CarLyricTicker
 import moe.lance.ytmusiclyric.LyricDisplayMode
 import moe.lance.ytmusiclyric.LyricsRepository
+import moe.lance.ytmusiclyric.R
 import moe.lance.ytmusiclyric.cache.LyricsCacheEntry
 import moe.lance.ytmusiclyric.cache.LyricsDatabaseHelper
 import java.text.SimpleDateFormat
@@ -38,453 +29,182 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 class SettingsActivity : Activity() {
-
     private val bgExecutor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
-
     private lateinit var dbHelper: LyricsDatabaseHelper
-
-    // Cache management UI components
+    private lateinit var ui: HyperStyle
     private lateinit var cacheStatsText: TextView
     private lateinit var cacheListContainer: LinearLayout
-    private lateinit var searchInput: EditText
-    private var currentSearchKeyword: String = ""
+    private var currentSearchKeyword = ""
+    private var cacheRequest = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         dbHelper = LyricsDatabaseHelper.getInstance(this)
-
+        ui = HyperStyle(this)
         val prefs = getSharedPreferences(CarBluetoothLyricConfig.PREFS_NAME, Context.MODE_PRIVATE)
-        var currentConfig = CarBluetoothLyricConfig.fromPreferences(prefs)
-
-        fun saveConfig(newConfig: CarBluetoothLyricConfig) {
-            currentConfig = newConfig
+        var config = CarBluetoothLyricConfig.fromPreferences(prefs)
+        fun saveConfig(value: CarBluetoothLyricConfig) {
+            config = value
             prefs.edit()
-                .putBoolean(CarBluetoothLyricConfig.KEY_ENABLED, newConfig.enabled)
-                .putBoolean(CarBluetoothLyricConfig.KEY_ONLY_BLUETOOTH, newConfig.onlyWhenBluetooth)
-                .putString(CarBluetoothLyricConfig.KEY_DISPLAY_MODE, newConfig.displayMode.key)
-                .putLong(CarBluetoothLyricConfig.KEY_OFFSET_MS, newConfig.offsetMs)
+                .putBoolean(CarBluetoothLyricConfig.KEY_ENABLED, value.enabled)
+                .putBoolean(CarBluetoothLyricConfig.KEY_ONLY_BLUETOOTH, value.onlyWhenBluetooth)
+                .putString(CarBluetoothLyricConfig.KEY_DISPLAY_MODE, value.displayMode.key)
+                .putLong(CarBluetoothLyricConfig.KEY_OFFSET_MS, value.offsetMs)
                 .apply()
         }
 
-        val root = ScrollView(this).apply {
-            setBackgroundColor(Color.parseColor("#121212"))
-            isFillViewport = true
+        val content = ui.page("设置", "YouTube Music HyperLyric")
+        val car = ui.section(content, "车载蓝牙歌词")
+        ui.toggle(car, "显示车载歌词", "将同步歌词推送到车机的歌曲信息栏", config.enabled) {
+            saveConfig(config.copy(enabled = it))
         }
-
-        val container = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(32), dp(18), dp(40))
+        ui.divider(car)
+        ui.toggle(car, "仅在连接蓝牙时生效", "暂停或断开蓝牙后恢复原歌名，避免影响手机通知栏与锁屏", config.onlyWhenBluetooth) {
+            saveConfig(config.copy(onlyWhenBluetooth = it))
         }
-        root.addView(container)
-
-        // Header Title
-        val titleText = TextView(this).apply {
-            text = "YouTube Music HyperLyric"
-            setTextColor(Color.WHITE)
-            textSize = 22f
-            typeface = Typeface.DEFAULT_BOLD
+        ui.divider(car)
+        val modes = listOf(
+            LyricDisplayMode.TITLE_ONLY to "标题栏替换（推荐）",
+            LyricDisplayMode.TITLE_WITH_SONG to "标题栏拼接 · 歌名 - 歌词",
+            LyricDisplayMode.ARTIST_ONLY to "歌手栏替换 · 保留歌名",
+            LyricDisplayMode.ALBUM_ONLY to "专辑栏替换 · 保留歌名与歌手",
+        )
+        val modeRow = ui.preference(car, "歌词显示位置", "选择车机用于展示歌词的信息栏")
+        val modeValue = ui.label(modes.first { it.first == config.displayMode }.second, 14f, ui.primary)
+        val modeCopy = modeRow.getChildAt(0) as LinearLayout
+        modeCopy.addView(modeValue.apply { setPadding(0, ui.dp(8), 0, 0) })
+        modeRow.addView(ui.label("›", 26f, ui.secondary))
+        modeRow.background = ui.ripple(ui.surface)
+        modeRow.setOnClickListener {
+            ui.showDialog(AlertDialog.Builder(this)
+                .setTitle("歌词显示位置")
+                .setSingleChoiceItems(modes.map { it.second }.toTypedArray(), modes.indexOfFirst { it.first == config.displayMode }) { dialog, index ->
+                    saveConfig(config.copy(displayMode = modes[index].first))
+                    modeValue.text = modes[index].second
+                    dialog.dismiss()
+                }
+                .setNegativeButton("取消", null))
         }
-        container.addView(titleText)
-
-        val subTitleText = TextView(this).apply {
-            text = "HyperLyric 状态栏/超级岛 & 车载蓝牙歌词增强模块"
-            setTextColor(Color.parseColor("#9E9E9E"))
-            textSize = 13f
-            setPadding(0, dp(4), 0, dp(18))
+        ui.divider(car)
+        val offset = ui.paddedContent(car)
+        offset.addView(ui.label("蓝牙延迟补偿"))
+        ui.hint(offset, "根据车机的音频延迟微调，范围 −5000 至 +5000 ms")
+        val offsetValue = ui.label("${config.offsetMs} ms", 28f, ui.primary, true)
+        offsetValue.gravity = android.view.Gravity.CENTER
+        offsetValue.accessibilityLiveRegion = android.view.View.ACCESSIBILITY_LIVE_REGION_POLITE
+        offset.addView(offsetValue, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = ui.dp(12) })
+        fun updateOffset(value: Long) {
+            saveConfig(config.copy(offsetMs = value.coerceIn(-5000L, 5000L)))
+            offsetValue.text = "${config.offsetMs} ms"
         }
-        container.addView(subTitleText)
+        val offsetButtons = ui.row()
+        addEqualButton(offsetButtons, ui.button("−200 ms") { updateOffset(config.offsetMs - 200) })
+        addEqualButton(offsetButtons, ui.button("重置") { updateOffset(0) })
+        addEqualButton(offsetButtons, ui.button("+200 ms") { updateOffset(config.offsetMs + 200) }, last = true)
+        offset.addView(offsetButtons)
 
-        // 1. Car Bluetooth Settings Card
-        val carCard = createCard().apply {
-            val sectionTitle = TextView(this@SettingsActivity).apply {
-                text = "🚗 车载蓝牙歌词设置"
-                setTextColor(Color.parseColor("#64B5F6"))
-                textSize = 16f
-                typeface = Typeface.DEFAULT_BOLD
-                setPadding(0, 0, 0, dp(12))
-            }
-            addView(sectionTitle)
-
-            // Switch: Enable Car Bluetooth Lyrics
-            val enableSwitch = Switch(this@SettingsActivity).apply {
-                text = "启用车载蓝牙显示歌词"
-                setTextColor(Color.WHITE)
-                textSize = 15f
-                isChecked = currentConfig.enabled
-                setOnCheckedChangeListener { _, isChecked ->
-                    saveConfig(currentConfig.copy(enabled = isChecked))
-                }
-            }
-            addView(enableSwitch)
-
-            // Switch: Only When Bluetooth Audio Connected
-            val onlyBtSwitch = Switch(this@SettingsActivity).apply {
-                text = "仅连接蓝牙音频时生效"
-                setTextColor(Color.WHITE)
-                textSize = 15f
-                isChecked = currentConfig.onlyWhenBluetooth
-                setPadding(0, dp(10), 0, 0)
-                setOnCheckedChangeListener { _, isChecked ->
-                    saveConfig(currentConfig.copy(onlyWhenBluetooth = isChecked))
-                }
-            }
-            addView(onlyBtSwitch)
-
-            val onlyBtHint = TextView(this@SettingsActivity).apply {
-                text = "开启后，未连接蓝牙时不替换手机通知栏与锁屏歌名；连接汽车或蓝牙耳机时自动激活歌词推送，暂停或断开时自动恢复原歌名。"
-                setTextColor(Color.parseColor("#757575"))
-                textSize = 12f
-                setPadding(0, dp(4), 0, dp(16))
-            }
-            addView(onlyBtHint)
-
-            // RadioGroup: Display Mode
-            val modeLabel = TextView(this@SettingsActivity).apply {
-                text = "歌词展示槽位与样式"
-                setTextColor(Color.parseColor("#B0BEC5"))
-                textSize = 14f
-                typeface = Typeface.DEFAULT_BOLD
-                setPadding(0, dp(8), 0, dp(6))
-            }
-            addView(modeLabel)
-
-            val radioGroup = RadioGroup(this@SettingsActivity)
-            val modes = listOf(
-                LyricDisplayMode.TITLE_ONLY to "标题栏替换 (推荐，车机屏幕字号最大最清晰)",
-                LyricDisplayMode.TITLE_WITH_SONG to "标题栏拼接 (歌名 - 歌词)",
-                LyricDisplayMode.ARTIST_ONLY to "歌手栏替换 (歌名保留，歌手栏显示歌词)",
-                LyricDisplayMode.ALBUM_ONLY to "专辑栏替换 (歌名与歌手保留，专辑栏显示歌词)",
-            )
-
-            modes.forEach { (mode, label) ->
-                val rb = RadioButton(this@SettingsActivity).apply {
-                    text = label
-                    setTextColor(Color.parseColor("#E0E0E0"))
-                    textSize = 13f
-                    id = View.generateViewId()
-                    isChecked = (mode == currentConfig.displayMode)
-                    setPadding(dp(6), dp(4), 0, dp(4))
-                }
-                radioGroup.addView(rb)
-                if (mode == currentConfig.displayMode) {
-                    radioGroup.check(rb.id)
-                }
-            }
-
-            radioGroup.setOnCheckedChangeListener { group, checkedId ->
-                val selectedIndex = group.indexOfChild(group.findViewById(checkedId))
-                if (selectedIndex in modes.indices) {
-                    val chosenMode = modes[selectedIndex].first
-                    saveConfig(currentConfig.copy(displayMode = chosenMode))
-                }
-            }
-            addView(radioGroup)
-
-            // Offset adjustment
-            val offsetLabel = TextView(this@SettingsActivity).apply {
-                text = "时间轴微调补偿 (解决不同车机蓝牙音频延迟)"
-                setTextColor(Color.parseColor("#B0BEC5"))
-                textSize = 14f
-                typeface = Typeface.DEFAULT_BOLD
-                setPadding(0, dp(16), 0, dp(6))
-            }
-            addView(offsetLabel)
-
-            val offsetLayout = LinearLayout(this@SettingsActivity).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-            }
-
-            val offsetValue = TextView(this@SettingsActivity).apply {
-                text = "${currentConfig.offsetMs} ms"
-                setTextColor(Color.WHITE)
-                textSize = 16f
-                typeface = Typeface.DEFAULT_BOLD
-                setPadding(0, 0, dp(16), 0)
-            }
-
-            fun updateOffset(delta: Long) {
-                val newOffset = (currentConfig.offsetMs + delta).coerceIn(-5000L, 5000L)
-                saveConfig(currentConfig.copy(offsetMs = newOffset))
-                offsetValue.text = "$newOffset ms"
-            }
-
-            val minusBtn = Button(this@SettingsActivity).apply {
-                text = "-200ms"
-                setTextColor(Color.WHITE)
-                setBackgroundColor(Color.parseColor("#37474F"))
-                setOnClickListener { updateOffset(-200L) }
-            }
-            val plusBtn = Button(this@SettingsActivity).apply {
-                text = "+200ms"
-                setTextColor(Color.WHITE)
-                setBackgroundColor(Color.parseColor("#37474F"))
-                setOnClickListener { updateOffset(200L) }
-            }
-            val resetBtn = Button(this@SettingsActivity).apply {
-                text = "重置"
-                setTextColor(Color.parseColor("#90CAF9"))
-                setBackgroundColor(Color.parseColor("#263238"))
-                setOnClickListener {
-                    saveConfig(currentConfig.copy(offsetMs = 0L))
-                    offsetValue.text = "0 ms"
-                }
-            }
-
-            offsetLayout.addView(offsetValue)
-            offsetLayout.addView(minusBtn)
-            offsetLayout.addView(plusBtn)
-            offsetLayout.addView(resetBtn)
-            addView(offsetLayout)
+        val system = ui.section(content, "模块与系统")
+        ui.toggle(system, "隐藏桌面图标", "隐藏后仍可从 LSPosed 的模块设置进入", prefs.getBoolean(CarBluetoothLyricConfig.KEY_HIDE_LAUNCHER_ICON, false)) { hide ->
+            prefs.edit().putBoolean(CarBluetoothLyricConfig.KEY_HIDE_LAUNCHER_ICON, hide).apply()
+            setLauncherIconVisible(!hide)
+            Toast.makeText(this, if (hide) "桌面图标已隐藏，可从 LSPosed 模块设置重新打开" else "桌面图标已显示", Toast.LENGTH_SHORT).show()
         }
-        container.addView(carCard)
-        addDivider(container)
+        ui.divider(system)
+        val restartContent = ui.paddedContent(system)
+        restartContent.addView(ui.label("重启系统界面"))
+        val restartStatus = ui.hint(restartContent, "需要 root 授权，重启期间状态栏和导航栏会短暂消失。")
+        lateinit var restartButton: Button
+        restartButton = ui.button("重启 SystemUI") { restartSystemUi(restartButton, restartStatus) }
+        restartContent.addView(restartButton, LinearLayout.LayoutParams(-1, -2))
 
-        // 2. Module and SystemUI actions
-        val systemCard = createCard().apply {
-            val sectionTitle = TextView(this@SettingsActivity).apply {
-                text = "🛠 模块与系统操作"
-                setTextColor(Color.parseColor("#FFCC80"))
-                textSize = 16f
-                typeface = Typeface.DEFAULT_BOLD
+        val cache = ui.section(content, "本地歌词")
+        val cacheContent = ui.paddedContent(cache)
+        cacheContent.addView(ui.label("歌词缓存", 18f, bold = true))
+        ui.hint(cacheContent, "点击歌曲可编辑歌词、手动搜索或重新下载。下载失败的歌曲也会保留记录。")
+        cacheStatsText = ui.label("正在统计缓存…", 13f, ui.secondary)
+        cacheContent.addView(cacheStatsText, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = ui.dp(12) })
+        val search = ui.input("搜索歌名或歌手").apply { id = R.id.cache_search }
+        search.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                currentSearchKeyword = s?.toString().orEmpty().trim()
+                loadCacheList()
             }
-            addView(sectionTitle)
+            override fun afterTextChanged(s: Editable?) = Unit
+        })
+        cacheContent.addView(search)
+        cacheListContainer = ui.column()
+        cacheContent.addView(cacheListContainer)
+        cacheContent.addView(ui.button("清空全部缓存", destructive = true) { handleClearAllCache() }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = ui.dp(12) })
 
-            val hideIconSwitch = Switch(this@SettingsActivity).apply {
-                text = "隐藏桌面图标"
-                setTextColor(Color.WHITE)
-                textSize = 15f
-                isChecked = prefs.getBoolean(CarBluetoothLyricConfig.KEY_HIDE_LAUNCHER_ICON, false)
-                setOnCheckedChangeListener { _, hide ->
-                    prefs.edit().putBoolean(CarBluetoothLyricConfig.KEY_HIDE_LAUNCHER_ICON, hide).apply()
-                    setLauncherIconVisible(!hide)
-                    Toast.makeText(
-                        this@SettingsActivity,
-                        if (hide) "桌面图标已隐藏，可从 LSPosed 模块设置重新打开" else "桌面图标已显示",
-                        Toast.LENGTH_SHORT,
-                    ).show()
-                }
-            }
-            addView(hideIconSwitch)
-
-            val iconHint = TextView(this@SettingsActivity).apply {
-                text = "只隐藏桌面入口，不影响 LSPosed 模块运行；隐藏后仍可从 LSPosed 的模块设置进入本页面。"
-                setTextColor(Color.parseColor("#757575"))
-                textSize = 12f
-                setPadding(0, dp(2), 0, dp(12))
-            }
-            addView(iconHint)
-
-            val restartStatus = TextView(this@SettingsActivity).apply {
-                text = "重启 SystemUI 需要设备已授权 root。重启期间状态栏和导航栏可能短暂消失。"
-                setTextColor(Color.parseColor("#9E9E9E"))
-                textSize = 12f
-                setPadding(0, 0, 0, dp(6))
-            }
-            addView(restartStatus)
-
-            val restartButton = Button(this@SettingsActivity).apply {
-                text = "快速重启 SystemUI"
-                setTextColor(Color.WHITE)
-                setBackgroundColor(Color.parseColor("#8D6E63"))
-                setOnClickListener { restartSystemUi(this, restartStatus) }
-            }
-            addView(restartButton)
+        val test = ui.paddedContent(ui.section(content, "歌词检索测试"))
+        test.addView(ui.label("试试三源检索", 18f, bold = true))
+        ui.hint(test, "依次检索 LRCLIB、网易云与酷狗，预览车机上的歌词显示效果。")
+        test.addView(ui.label("歌曲标题", 13f, ui.secondary).apply { setPadding(0, 0, 0, ui.dp(6)) })
+        val titleInput = ui.input("歌曲标题", "晴天").apply { id = R.id.test_title }
+        test.addView(titleInput)
+        test.addView(ui.label("歌手", 13f, ui.secondary).apply { setPadding(0, 0, 0, ui.dp(6)) })
+        val artistInput = ui.input("歌手（可留空）", "周杰伦").apply { id = R.id.test_artist }
+        test.addView(artistInput)
+        val resultText = ui.label("输入歌曲信息，开始检索同步歌词。", 13f, ui.secondary).apply {
+            id = R.id.test_result
+            freezesText = true
+            setPadding(0, ui.dp(12), 0, 0)
+            setTextIsSelectable(true)
+            accessibilityLiveRegion = android.view.View.ACCESSIBILITY_LIVE_REGION_POLITE
         }
-        container.addView(systemCard)
-        addDivider(container)
-
-        // 3. Local Lyric Cache Management Card
-        val cacheCard = createCard().apply {
-            val headerRow = LinearLayout(this@SettingsActivity).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                )
-            }
-
-            val sectionTitle = TextView(this@SettingsActivity).apply {
-                text = "📂 本地歌词缓存管理"
-                setTextColor(Color.parseColor("#81C784"))
-                textSize = 16f
-                typeface = Typeface.DEFAULT_BOLD
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-            }
-            headerRow.addView(sectionTitle)
-
-            val clearAllBtn = Button(this@SettingsActivity).apply {
-                text = "清空缓存"
-                setTextColor(Color.parseColor("#EF9A9A"))
-                setBackgroundColor(Color.parseColor("#2C1B1B"))
-                textSize = 12f
-                setOnClickListener { handleClearAllCache() }
-            }
-            headerRow.addView(clearAllBtn)
-            addView(headerRow)
-
-            val cacheDesc = TextView(this@SettingsActivity).apply {
-                text = "成功获取的歌词会保存在本地，下载失败的歌曲也会列出。点击歌曲可手动输入关键词搜索、编辑歌词或重新下载。"
-                setTextColor(Color.parseColor("#9E9E9E"))
-                textSize = 12f
-                setPadding(0, dp(6), 0, dp(10))
-            }
-            addView(cacheDesc)
-
-            cacheStatsText = TextView(this@SettingsActivity).apply {
-                text = "正在统计缓存数据..."
-                setTextColor(Color.parseColor("#B0BEC5"))
-                textSize = 13f
-                typeface = Typeface.DEFAULT_BOLD
-                setPadding(0, 0, 0, dp(8))
-            }
-            addView(cacheStatsText)
-
-            // Search Filter
-            searchInput = EditText(this@SettingsActivity).apply {
-                hint = "🔍 搜索歌名或歌手过滤列表..."
-                setHintTextColor(Color.parseColor("#546E7A"))
-                setTextColor(Color.WHITE)
-                setBackgroundColor(Color.parseColor("#181818"))
-                textSize = 13f
-                setPadding(dp(12), dp(10), dp(12), dp(10))
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                ).apply {
-                    bottomMargin = dp(10)
-                }
-                addTextChangedListener(object : TextWatcher {
-                    override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
-                    override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                        currentSearchKeyword = s?.toString()?.trim().orEmpty()
+        lateinit var testButton: Button
+        testButton = ui.button("开始检索", prominent = true) {
+            val title = titleInput.text.toString().trim()
+            val artist = artistInput.text.toString().trim()
+            if (title.isBlank()) {
+                titleInput.error = "请输入歌曲标题"
+            } else {
+                resultText.setTextColor(ui.secondary)
+                resultText.text = "正在联网检索，请稍候…"
+                testButton.isEnabled = false
+                testButton.text = "检索中…"
+                val mode = config.displayMode
+                bgExecutor.execute {
+                    val result = runCatching { LyricsRepository.getLyrics(title, artist, "", 240_000L, this) }
+                    mainHandler.post {
+                        if (isFinishing || isDestroyed) return@post
+                        testButton.isEnabled = true
+                        testButton.text = "开始检索"
+                        val lines = result.getOrNull()
+                        if (lines.isNullOrEmpty()) {
+                            resultText.setTextColor(ui.error)
+                            resultText.text = "未检索到同步歌词，请检查歌名、歌手或网络后重试。"
+                        } else {
+                            val sample = lines.getOrNull(1) ?: lines.first()
+                            val (formattedTitle, formattedArtist, formattedAlbum) = CarLyricTicker.formatMetadata(
+                                origTitle = title, origArtist = artist, origAlbum = "测试专辑", activeLine = sample, mode = mode,
+                            )
+                            val preview = lines.take(3).joinToString("\n") { "[${it.begin}ms] ${it.text}" }
+                            resultText.setTextColor(ui.text)
+                            resultText.text = "已匹配 ${lines.size} 行同步歌词，已保存至本地缓存。\n\n车机预览 · ${mode.displayName}\n标题：$formattedTitle\n歌手：$formattedArtist\n专辑：$formattedAlbum\n\n歌词前 3 句\n$preview"
+                        }
                         loadCacheList()
                     }
-                    override fun afterTextChanged(s: Editable?) = Unit
-                })
-            }
-            addView(searchInput)
-
-            // Dynamic Cache Items Container
-            cacheListContainer = LinearLayout(this@SettingsActivity).apply {
-                orientation = LinearLayout.VERTICAL
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                )
-            }
-            addView(cacheListContainer)
-        }
-        container.addView(cacheCard)
-        addDivider(container)
-
-        // 4. Test Lyric Search Card
-        val testCard = createCard().apply {
-            val sectionTitle = TextView(this@SettingsActivity).apply {
-                text = "🔍 歌词三源检索即时测试"
-                setTextColor(Color.parseColor("#FFB74D"))
-                textSize = 16f
-                typeface = Typeface.DEFAULT_BOLD
-                setPadding(0, 0, 0, dp(8))
-            }
-            addView(sectionTitle)
-
-            val titleEdit = EditText(this@SettingsActivity).apply {
-                hint = "歌曲标题 (如: 晴天)"
-                setHintTextColor(Color.parseColor("#757575"))
-                setTextColor(Color.WHITE)
-                setText("晴天")
-                textSize = 14f
-            }
-            addView(titleEdit)
-
-            val artistEdit = EditText(this@SettingsActivity).apply {
-                hint = "艺术家/歌手 (如: 周杰伦)"
-                setHintTextColor(Color.parseColor("#757575"))
-                setTextColor(Color.WHITE)
-                setText("周杰伦")
-                textSize = 14f
-            }
-            addView(artistEdit)
-
-            val resultText = TextView(this@SettingsActivity).apply {
-                text = "点击下方按钮测试 LRCLIB + 网易云 + 酷狗三源抓取并预览车机格式化效果..."
-                setTextColor(Color.parseColor("#9E9E9E"))
-                textSize = 12f
-                setPadding(0, dp(8), 0, dp(8))
-                setLineSpacing(dp(2).toFloat(), 1.0f)
-            }
-            addView(resultText)
-
-            val testBtn = Button(this@SettingsActivity).apply {
-                text = "开始测试检索"
-                setTextColor(Color.WHITE)
-                setBackgroundColor(Color.parseColor("#1565C0"))
-                setOnClickListener {
-                    val t = titleEdit.text.toString().trim()
-                    val a = artistEdit.text.toString().trim()
-                    if (t.isBlank()) {
-                        Toast.makeText(this@SettingsActivity, "请输入歌曲标题", Toast.LENGTH_SHORT).show()
-                        return@setOnClickListener
-                    }
-                    resultText.text = "正在联网检索中，请稍候..."
-                    isEnabled = false
-
-                    bgExecutor.execute {
-                        val lines = LyricsRepository.getLyrics(t, a, "", 240_000L, this@SettingsActivity)
-                        mainHandler.post {
-                            isEnabled = true
-                            if (lines.isNullOrEmpty()) {
-                                resultText.text = "❌ 未检索到同步歌词，请检查歌名/歌手输入或网络。"
-                            } else {
-                                val first3 = lines.take(3).joinToString("\n") { "[${it.begin}ms] ${it.text}" }
-                                val sampleLine = lines.getOrNull(1) ?: lines.first()
-                                val (formattedTitle, formattedArtist, formattedAlbum) = CarLyricTicker.formatMetadata(
-                                    origTitle = t,
-                                    origArtist = a,
-                                    origAlbum = "测试专辑",
-                                    activeLine = sampleLine,
-                                    mode = currentConfig.displayMode,
-                                    )
-                                resultText.text = "✅ 成功匹配 ${lines.size} 行同步歌词！(已自动保存至本地缓存)\n\n【车机推送预览 (${currentConfig.displayMode.displayName})】\n• Title: $formattedTitle\n• Artist: $formattedArtist\n• Album: $formattedAlbum\n\n【歌词前3句示例】\n$first3"
-                                loadCacheList()
-                            }
-                        }
-                    }
                 }
             }
-            addView(testBtn)
         }
-        container.addView(testCard)
-        addDivider(container)
+        test.addView(testButton, LinearLayout.LayoutParams(-1, -2))
+        test.addView(resultText)
 
-        // 5. Status Card (Scope Guide)
-        val statusCard = createCard().apply {
-            val scopeTitle = TextView(this@SettingsActivity).apply {
-                text = "📌 LSPosed 作用域配置指引"
-                setTextColor(Color.parseColor("#81C784"))
-                textSize = 15f
-                typeface = Typeface.DEFAULT_BOLD
-            }
-            addView(scopeTitle)
+        val scope = ui.section(content, "使用指引")
+        ui.preference(scope, "System UI", "在 LSPosed 勾选「系统界面」，用于 HyperLyric 状态栏与超级岛歌词。")
+        ui.divider(scope)
+        ui.preference(scope, "YouTube Music", "勾选 YouTube Music，用于车载蓝牙歌词。两个作用域可同时启用。")
+        content.addView(ui.label("YouTube Music HyperLyric · 歌词增强模块", 12f, ui.secondary).apply {
+            gravity = android.view.Gravity.CENTER
+            setPadding(ui.dp(12), ui.dp(28), ui.dp(12), 0)
+        })
+    }
 
-            val scopeDesc = TextView(this@SettingsActivity).apply {
-                text = "• 系统界面 (System UI)：用于 HyperLyric 状态栏/灵动岛胶囊歌词\n• YouTube Music：用于车载蓝牙 (AVRCP) 屏幕显示歌词\n两者可同时勾选，独立运行且互不冲突。"
-                setTextColor(Color.parseColor("#E0E0E0"))
-                textSize = 13f
-                setPadding(0, dp(8), 0, 0)
-                setLineSpacing(dp(4).toFloat(), 1.0f)
-            }
-            addView(scopeDesc)
-        }
-        container.addView(statusCard)
-
-        applyWindowInsets(root, container)
-        setContentView(root)
-        root.requestApplyInsets()
-        loadCacheList()
+    private fun addEqualButton(row: LinearLayout, button: Button, last: Boolean = false) {
+        row.addView(button, LinearLayout.LayoutParams(0, -2, 1f).apply { if (!last) marginEnd = ui.dp(8) })
     }
 
     override fun onResume() {
@@ -494,154 +214,63 @@ class SettingsActivity : Activity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == 1001 && resultCode == RESULT_OK) {
-            loadCacheList()
-        }
+        if (requestCode == 1001 && resultCode == RESULT_OK) loadCacheList()
     }
 
     private fun loadCacheList() {
+        if (!::cacheListContainer.isInitialized || isDestroyed) return
+        val keyword = currentSearchKeyword.takeIf { it.isNotBlank() }
+        val request = ++cacheRequest
         bgExecutor.execute {
-            val kw = currentSearchKeyword.takeIf { it.isNotBlank() }
-            val count = dbHelper.getCount(kw)
-            val list = dbHelper.getAll(searchKeyword = kw, limit = 100)
-
+            val count = dbHelper.getCount(keyword)
+            val list = dbHelper.getAll(searchKeyword = keyword, limit = 100)
             mainHandler.post {
-                updateCacheUi(count, list)
+                if (isFinishing || isDestroyed || request != cacheRequest) return@post
+                cacheStatsText.text = if (keyword == null) "共 $count 首歌曲（含下载失败）" else "找到 $count 首歌曲"
+                if (count > list.size) cacheStatsText.append(" · 显示前 ${list.size} 首，请搜索缩小范围")
+                cacheListContainer.removeAllViews()
+                if (list.isEmpty()) {
+                    cacheListContainer.addView(ui.label(
+                        if (keyword == null) "暂无歌曲记录\n播放 YouTube Music 并检索歌词后，会自动保存在这里。" else "没有匹配的歌曲\n试试其他歌名或歌手。",
+                        14f, ui.secondary,
+                    ).apply {
+                        gravity = android.view.Gravity.CENTER
+                        setPadding(ui.dp(8), ui.dp(24), ui.dp(8), ui.dp(24))
+                    })
+                } else list.forEach { addCacheEntry(it) }
             }
         }
     }
 
-    private fun updateCacheUi(count: Int, list: List<LyricsCacheEntry>) {
-        if (currentSearchKeyword.isBlank()) {
-            cacheStatsText.text = "共记录 $count 首歌曲（含下载失败）"
-        } else {
-            cacheStatsText.text = "搜索结果: $count 首歌曲 (筛选: \"$currentSearchKeyword\")"
-        }
-
-        cacheListContainer.removeAllViews()
-
-        if (list.isEmpty()) {
-            val emptyView = TextView(this).apply {
-                text = if (currentSearchKeyword.isBlank()) {
-                    "暂无歌曲记录。在 YouTube Music 中播放歌曲并检索歌词后将自动记录。"
-                } else {
-                    "未搜索到匹配的本地缓存歌词"
-                }
-                setTextColor(Color.parseColor("#757575"))
-                textSize = 13f
-                gravity = Gravity.CENTER
-                setPadding(0, dp(20), 0, dp(20))
-            }
-            cacheListContainer.addView(emptyView)
-            return
-        }
-
-        list.forEach { entry ->
-            val itemCard = createCacheItemView(entry)
-            cacheListContainer.addView(itemCard)
-        }
-    }
-
-    private fun createCacheItemView(entry: LyricsCacheEntry): View {
-        val itemRoot = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(Color.parseColor("#181818"))
-            setPadding(dp(12), dp(10), dp(12), dp(10))
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply {
-                bottomMargin = dp(8)
-            }
-            isClickable = true
+    private fun addCacheEntry(entry: LyricsCacheEntry) {
+        val row = ui.row().apply {
+            setPadding(ui.dp(12), ui.dp(14), ui.dp(12), ui.dp(14))
+            background = ui.ripple(ui.field, 14)
             isFocusable = true
-            setOnClickListener {
-                LyricDetailActivity.start(this@SettingsActivity, entry.cacheKey, 1001)
-            }
+            setOnClickListener { LyricDetailActivity.start(this@SettingsActivity, entry.cacheKey, 1001) }
         }
-
-        // Info Column
-        val infoCol = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        }
-
-        val songTitle = TextView(this).apply {
-            text = entry.title
-            setTextColor(Color.WHITE)
-            textSize = 14f
-            typeface = Typeface.DEFAULT_BOLD
+        val info = ui.column()
+        info.addView(ui.label(entry.title, 16f, bold = true).apply {
+            maxLines = 2
+            ellipsize = TextUtils.TruncateAt.END
+        })
+        info.addView(ui.label(entry.artist, 13f, ui.secondary).apply {
             maxLines = 1
-        }
-        infoCol.addView(songTitle)
-
-        val songArtist = TextView(this).apply {
-            text = entry.artist
-            setTextColor(Color.parseColor("#B0BEC5"))
-            textSize = 12f
-            maxLines = 1
-            setPadding(0, dp(2), 0, dp(4))
-        }
-        infoCol.addView(songArtist)
-
-        // Metadata tag row
-        val tagRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-
-        val sourceBadge = TextView(this).apply {
-            text = entry.displaySource
-            textSize = 10f
-            typeface = Typeface.DEFAULT_BOLD
-            setPadding(dp(6), dp(1), dp(6), dp(1))
-            setTextColor(Color.WHITE)
-            when (entry.displaySource) {
-                "下载失败" -> setBackgroundColor(Color.parseColor("#8D6E63"))
-                "LRCLIB" -> setBackgroundColor(Color.parseColor("#1565C0"))
-                "网易云" -> setBackgroundColor(Color.parseColor("#C62828"))
-                "酷狗" -> setBackgroundColor(Color.parseColor("#00838F"))
-                "自定义编辑" -> setBackgroundColor(Color.parseColor("#E65100"))
-                else -> setBackgroundColor(Color.parseColor("#455A64"))
-            }
-        }
-        tagRow.addView(sourceBadge)
-
-        val dateStr = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(entry.updatedAt))
-        val dateText = TextView(this).apply {
-            text = "  •  $dateStr"
-            setTextColor(Color.parseColor("#616161"))
-            textSize = 11f
-        }
-        tagRow.addView(dateText)
-        infoCol.addView(tagRow)
-
-        itemRoot.addView(infoCol)
-
-        // Quick Delete Button
-        val deleteBtn = Button(this).apply {
-            text = "删除"
-            setTextColor(Color.parseColor("#EF9A9A"))
-            setBackgroundColor(Color.parseColor("#2B2121"))
-            textSize = 11f
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                dp(36),
-            ).apply {
-                marginStart = dp(8)
-            }
-            setOnClickListener {
-                confirmDeleteSingle(entry)
-            }
-        }
-        itemRoot.addView(deleteBtn)
-
-        return itemRoot
+            ellipsize = TextUtils.TruncateAt.END
+            setPadding(0, ui.dp(3), 0, ui.dp(8))
+        })
+        info.addView(ui.badge(entry.displaySource, !entry.hasLyrics), LinearLayout.LayoutParams(-2, -2))
+        val date = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(entry.updatedAt))
+        info.addView(ui.label("更新于 $date", 11f, ui.secondary).apply { setPadding(0, ui.dp(6), 0, 0) })
+        row.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
+        row.addView(ui.button("删除", destructive = true) { confirmDeleteSingle(entry) }.apply {
+            contentDescription = "删除《${entry.title}》的缓存"
+        }, LinearLayout.LayoutParams(-2, -2).apply { marginStart = ui.dp(8) })
+        cacheListContainer.addView(row, LinearLayout.LayoutParams(-1, -2).apply { topMargin = ui.dp(8) })
     }
 
     private fun confirmDeleteSingle(entry: LyricsCacheEntry) {
-        AlertDialog.Builder(this)
+        ui.showDialog(AlertDialog.Builder(this)
             .setTitle("删除缓存")
             .setMessage("确定删除《${entry.title} - ${entry.artist}》的本地歌词缓存吗？")
             .setPositiveButton("删除") { _, _ ->
@@ -650,12 +279,11 @@ class SettingsActivity : Activity() {
                 Toast.makeText(this, "已删除该歌曲缓存", Toast.LENGTH_SHORT).show()
                 loadCacheList()
             }
-            .setNegativeButton("取消", null)
-            .show()
+            .setNegativeButton("取消", null))
     }
 
     private fun handleClearAllCache() {
-        AlertDialog.Builder(this)
+        ui.showDialog(AlertDialog.Builder(this)
             .setTitle("清空全部缓存")
             .setMessage("确定要清空本地全部歌词缓存吗？清空后所有歌曲将需要重新联网检索。")
             .setPositiveButton("全部清空") { _, _ ->
@@ -664,27 +292,22 @@ class SettingsActivity : Activity() {
                 Toast.makeText(this, "已清空 $deleted 条本地歌词缓存", Toast.LENGTH_SHORT).show()
                 loadCacheList()
             }
-            .setNegativeButton("取消", null)
-            .show()
+            .setNegativeButton("取消", null))
     }
 
     private fun setLauncherIconVisible(visible: Boolean) {
-        val launcherComponent = ComponentName(this, "$packageName.ui.SettingsLauncher")
         packageManager.setComponentEnabledSetting(
-            launcherComponent,
-            if (visible) {
-                android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED
-            } else {
-                android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED
-            },
+            ComponentName(this, "$packageName.ui.SettingsLauncher"),
+            if (visible) android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+            else android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
             android.content.pm.PackageManager.DONT_KILL_APP,
         )
     }
 
     private fun restartSystemUi(button: Button, status: TextView) {
         button.isEnabled = false
-        status.setTextColor(Color.parseColor("#FFCC80"))
-        status.text = "正在请求 root 并重启 SystemUI..."
+        status.setTextColor(ui.secondary)
+        status.text = "正在请求 root 并重启 SystemUI…"
         bgExecutor.execute {
             val result = runCatching {
                 val process = Runtime.getRuntime().exec(arrayOf("su", "-c", "killall -TERM com.android.systemui"))
@@ -695,49 +318,18 @@ class SettingsActivity : Activity() {
                 if (process.exitValue() != 0) error("root 命令返回 ${process.exitValue()}")
             }
             mainHandler.post {
+                if (isFinishing || isDestroyed) return@post
                 button.isEnabled = true
-                if (result.isSuccess) {
-                    status.setTextColor(Color.parseColor("#A5D6A7"))
-                    status.text = "SystemUI 重启命令已执行，状态栏通常会在几秒内恢复。"
-                } else {
-                    status.setTextColor(Color.parseColor("#EF9A9A"))
-                    status.text = "重启失败：${result.exceptionOrNull()?.message ?: "未获得 root 权限"}"
-                }
+                status.setTextColor(if (result.isSuccess) ui.success else ui.error)
+                status.text = if (result.isSuccess) "SystemUI 重启命令已执行，状态栏通常会在几秒内恢复。"
+                else "重启失败：${result.exceptionOrNull()?.message ?: "未获得 root 权限"}"
             }
         }
     }
 
-    private fun applyWindowInsets(root: View, container: View) {
-        root.setOnApplyWindowInsetsListener { _, insets ->
-            val bars = insets.getInsets(WindowInsets.Type.systemBars())
-            container.setPadding(dp(18), dp(32) + bars.top, dp(18), dp(40) + bars.bottom)
-            insets
-        }
-    }
-
-    private fun createCard(): LinearLayout {
-        return LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.parseColor("#1E1E1E"))
-            setPadding(dp(16), dp(16), dp(16), dp(16))
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            )
-        }
-    }
-
-    private fun addDivider(parent: LinearLayout) {
-        val view = View(this).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(16),
-            )
-        }
-        parent.addView(view)
-    }
-
-    private fun dp(dp: Int): Int {
-        return (dp * resources.displayMetrics.density).toInt()
+    override fun onDestroy() {
+        bgExecutor.shutdownNow()
+        mainHandler.removeCallbacksAndMessages(null)
+        super.onDestroy()
     }
 }

@@ -3,7 +3,6 @@ package moe.lance.ytmusiclyric.ui
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
-import android.graphics.Color
 import android.graphics.Typeface
 import android.os.Bundle
 import android.os.Handler
@@ -13,16 +12,14 @@ import android.text.InputType
 import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
-import android.view.ViewGroup
-import android.view.WindowInsets
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import moe.lance.ytmusiclyric.LrcTimeShift
 import moe.lance.ytmusiclyric.LyricsRepository
+import moe.lance.ytmusiclyric.R
 import moe.lance.ytmusiclyric.cache.LyricsCacheEntry
 import moe.lance.ytmusiclyric.cache.LyricsDatabaseHelper
 import java.text.SimpleDateFormat
@@ -35,6 +32,7 @@ class LyricDetailActivity : Activity() {
     private val bgExecutor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
 
+    private lateinit var ui: HyperStyle
     private lateinit var dbHelper: LyricsDatabaseHelper
     private var cacheKey: String = ""
     private var currentEntry: LyricsCacheEntry? = null
@@ -78,335 +76,100 @@ class LyricDetailActivity : Activity() {
 
         setupUi()
         populateData()
+        // System theme changes recreate the activity; keep unsaved edits and their source.
+        if (savedInstanceState != null) {
+            searchTitleInput.setText(savedInstanceState.getString("searchTitle", currentEntry?.title.orEmpty()))
+            searchArtistInput.setText(savedInstanceState.getString("searchArtist", currentEntry?.artist.orEmpty()))
+            suppressShiftWatcher = true
+            lrcEditText.setText(savedInstanceState.getString("draft", currentEntry?.rawLrc.orEmpty()))
+            suppressShiftWatcher = false
+            lrcEditText.setSelection(savedInstanceState.getInt("selection", 0).coerceIn(0, lrcEditText.length()))
+            shiftBaseLrc = savedInstanceState.getString("shiftBase")
+            appliedShiftMs = savedInstanceState.getLong("shiftMs")
+            shiftValueView.text = if (appliedShiftMs == 0L) "本次未位移"
+            else "本次位移：${if (appliedShiftMs >= 0) "+" else ""}$appliedShiftMs ms"
+            val pendingLrc = savedInstanceState.getString("pendingLrc")
+            val pendingSource = savedInstanceState.getString("pendingSource")
+            if (pendingLrc != null && pendingSource != null) pendingSearchResult = pendingLrc to pendingSource
+            searchStatus.text = savedInstanceState.getString("searchStatus", "")
+        }
     }
 
     private fun setupUi() {
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.parseColor("#121212"))
-            layoutParams = ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT,
-            )
+        ui = HyperStyle(this)
+        val content = ui.page("歌词详情", "搜索、编辑与校准同步歌词", back = true)
+        val meta = ui.paddedContent(ui.section(content, "歌曲信息"))
+        titleView = ui.label("", 22f, bold = true)
+        artistView = ui.label("", 15f, ui.secondary).apply { setPadding(0, ui.dp(4), 0, ui.dp(12)) }
+        sourceBadge = ui.badge("")
+        timeView = ui.label("", 12f, ui.secondary).apply { setPadding(0, ui.dp(10), 0, 0) }
+        meta.addView(titleView)
+        meta.addView(artistView)
+        meta.addView(sourceBadge, LinearLayout.LayoutParams(-2, -2))
+        meta.addView(timeView)
+
+        val search = ui.paddedContent(ui.section(content, "手动搜索"))
+        search.addView(ui.label("查找匹配的歌词", 18f, bold = true))
+        ui.hint(search, "调整歌名或歌手，搜索结果会填入编辑框。点击「保存修改」后关联到当前歌曲。")
+        search.addView(ui.label("歌名或关键词", 13f, ui.secondary).apply { setPadding(0, 0, 0, ui.dp(6)) })
+        searchTitleInput = ui.input("歌名或搜索关键词", currentEntry?.title.orEmpty())
+        search.addView(searchTitleInput)
+        search.addView(ui.label("歌手", 13f, ui.secondary).apply { setPadding(0, 0, 0, ui.dp(6)) })
+        searchArtistInput = ui.input("歌手（可留空）", currentEntry?.artist.orEmpty())
+        search.addView(searchArtistInput)
+        searchBtn = ui.button("搜索歌词") { handleManualSearch() }
+        search.addView(searchBtn, LinearLayout.LayoutParams(-1, -2))
+        searchStatus = ui.hint(search, "").apply {
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
         }
 
-        // Top Navigation Bar
-        val topBar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(16), dp(16), dp(16), dp(12))
-            setBackgroundColor(Color.parseColor("#1A1A1A"))
+        val timeline = ui.paddedContent(ui.section(content, "时间轴校准"))
+        timeline.addView(ui.label("整体提前或延后", 18f, bold = true))
+        ui.hint(timeline, "调整整首歌词的时间，负数提前、正数延后。点击「保存修改」后生效。")
+        shiftValueView = ui.label("本次未位移", 22f, ui.primary, true).apply {
+            gravity = Gravity.CENTER
+            setPadding(0, 0, 0, ui.dp(14))
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
         }
-
-        val backBtn = TextView(this).apply {
-            text = "← 返回"
-            setTextColor(Color.parseColor("#90CAF9"))
-            textSize = 15f
-            typeface = Typeface.DEFAULT_BOLD
-            setPadding(0, 0, dp(16), 0)
-            setOnClickListener { finish() }
-        }
-        topBar.addView(backBtn)
-
-        val headerTitle = TextView(this).apply {
-            text = "歌词详情与编辑"
-            setTextColor(Color.WHITE)
-            textSize = 18f
-            typeface = Typeface.DEFAULT_BOLD
-        }
-        topBar.addView(headerTitle)
-        root.addView(topBar)
-
-        // Scrollable Content
-        val scrollView = ScrollView(this).apply {
-            isFillViewport = true
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                0,
-                1f,
-            )
-        }
-
-        val content = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(16), dp(16), dp(24))
-        }
-        scrollView.addView(content)
-        root.addView(scrollView)
-
-        // Song Metadata Card
-        val metaCard = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.parseColor("#1E1E1E"))
-            setPadding(dp(16), dp(16), dp(16), dp(16))
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            )
-        }
-
-        titleView = TextView(this).apply {
-            setTextColor(Color.WHITE)
-            textSize = 18f
-            typeface = Typeface.DEFAULT_BOLD
-        }
-        metaCard.addView(titleView)
-
-        artistView = TextView(this).apply {
-            setTextColor(Color.parseColor("#B0BEC5"))
-            textSize = 14f
-            setPadding(0, dp(4), 0, dp(10))
-        }
-        metaCard.addView(artistView)
-
-        val badgeRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-
-        sourceBadge = TextView(this).apply {
-            textSize = 11f
-            typeface = Typeface.DEFAULT_BOLD
-            setPadding(dp(8), dp(3), dp(8), dp(3))
-            setBackgroundColor(Color.parseColor("#2E7D32"))
-            setTextColor(Color.WHITE)
-        }
-        badgeRow.addView(sourceBadge)
-
-        timeView = TextView(this).apply {
-            setTextColor(Color.parseColor("#757575"))
-            textSize = 12f
-            setPadding(dp(12), 0, 0, 0)
-        }
-        badgeRow.addView(timeView)
-        metaCard.addView(badgeRow)
-        content.addView(metaCard)
-
-        addSpacer(content, dp(12))
-
-        val searchCard = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.parseColor("#1E1E1E"))
-            setPadding(dp(16), dp(14), dp(16), dp(14))
-        }
-        searchCard.addView(TextView(this).apply {
-            text = "手动搜索歌词"
-            setTextColor(Color.parseColor("#81C784"))
-            textSize = 14f
-            typeface = Typeface.DEFAULT_BOLD
-        })
-        searchCard.addView(TextView(this).apply {
-            text = "可修改歌名关键词和歌手，也可留空歌手。搜索结果填入下方编辑框，点击“保存修改”后关联到当前歌曲。"
-            setTextColor(Color.parseColor("#9E9E9E"))
-            textSize = 12f
-            setPadding(0, dp(4), 0, dp(8))
-        })
-        fun searchInput(label: String, value: String): EditText = EditText(this).apply {
-            hint = label
-            setText(value)
-            setTextColor(Color.WHITE)
-            setHintTextColor(Color.parseColor("#9E9E9E"))
-            textSize = 14f
-            setSingleLine(true)
-        }
-        searchTitleInput = searchInput("歌名或搜索关键词", currentEntry?.title.orEmpty())
-        searchArtistInput = searchInput("歌手（可留空）", currentEntry?.artist.orEmpty())
-        searchCard.addView(searchTitleInput)
-        searchCard.addView(searchArtistInput)
-        searchBtn = Button(this).apply {
-            text = "搜索歌词"
-            setTextColor(Color.WHITE)
-            setBackgroundColor(Color.parseColor("#2E7D32"))
-            setOnClickListener { handleManualSearch() }
-        }
-        searchCard.addView(searchBtn)
-        searchStatus = TextView(this).apply {
-            setTextColor(Color.parseColor("#B0BEC5"))
-            textSize = 12f
-        }
-        searchCard.addView(searchStatus)
-        content.addView(searchCard)
-        addSpacer(content, dp(12))
-
-        // Global timeline shift controls. The shift is applied to every timestamp in the
-        // editor and is persisted when the user taps the existing save button.
-        val timelineCard = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.parseColor("#1E1E1E"))
-            setPadding(dp(16), dp(14), dp(16), dp(14))
-        }
-
-        val timelineTitle = TextView(this).apply {
-            text = "⏱ 歌词时间轴整体位移"
-            setTextColor(Color.parseColor("#CE93D8"))
-            textSize = 14f
-            typeface = Typeface.DEFAULT_BOLD
-        }
-        timelineCard.addView(timelineTitle)
-
-        val timelineHint = TextView(this).apply {
-            text = "整首歌词统一提前或延后；修改后请点击“保存修改”才会写入缓存。单位：毫秒"
-            setTextColor(Color.parseColor("#9E9E9E"))
-            textSize = 12f
-            setPadding(0, dp(4), 0, dp(8))
-        }
-        timelineCard.addView(timelineHint)
-
-        shiftValueView = TextView(this).apply {
-            text = "本次未位移"
-            setTextColor(Color.WHITE)
-            textSize = 13f
-            typeface = Typeface.DEFAULT_BOLD
-            setPadding(0, 0, 0, dp(6))
-        }
-        timelineCard.addView(shiftValueView)
-
-        val quickShiftRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-
-        fun addShiftButton(label: String, deltaMs: Long) {
-            quickShiftRow.addView(Button(this).apply {
-                text = label
-                setTextColor(Color.WHITE)
-                setBackgroundColor(Color.parseColor("#37474F"))
-                textSize = 11f
-                setOnClickListener { applyTimelineShift(deltaMs) }
-                layoutParams = LinearLayout.LayoutParams(0, dp(42), 1f).apply {
-                    marginEnd = dp(4)
-                }
+        timeline.addView(shiftValueView, LinearLayout.LayoutParams(-1, -2))
+        val quickShift = ui.row()
+        listOf("−5 秒" to -5000L, "−1 秒" to -1000L, "+1 秒" to 1000L, "+5 秒" to 5000L).forEachIndexed { index, (label, delta) ->
+            quickShift.addView(ui.button(label) { applyTimelineShift(delta) }, LinearLayout.LayoutParams(0, -2, 1f).apply {
+                if (index < 3) marginEnd = ui.dp(6)
             })
         }
-        addShiftButton("-5秒", -5_000L)
-        addShiftButton("-1秒", -1_000L)
-        addShiftButton("+1秒", 1_000L)
-        addShiftButton("+5秒", 5_000L)
-        timelineCard.addView(quickShiftRow)
-
-        val customShiftRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        val customShiftInput = EditText(this).apply {
-            hint = "例如 350 或 -800"
-            setHintTextColor(Color.parseColor("#546E7A"))
-            setTextColor(Color.WHITE)
-            setBackgroundColor(Color.parseColor("#181818"))
-            textSize = 12f
+        timeline.addView(quickShift)
+        timeline.addView(ui.label("自定义位移（毫秒）", 13f, ui.secondary).apply {
+            setPadding(0, ui.dp(16), 0, ui.dp(8))
+        })
+        val customShiftInput = ui.input("例如 350 或 -800").apply {
+            id = R.id.custom_shift
             inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_SIGNED
-            setSingleLine(true)
-            setPadding(dp(10), 0, dp(10), 0)
-            layoutParams = LinearLayout.LayoutParams(0, dp(44), 1f).apply {
-                marginEnd = dp(6)
-                topMargin = dp(6)
+        }
+        timeline.addView(customShiftInput)
+        val shiftActions = ui.row()
+        shiftActions.addView(ui.button("应用位移") {
+            val delta = customShiftInput.text.toString().trim().toLongOrNull()
+            if (delta == null) customShiftInput.error = "请输入有效的毫秒数"
+            else {
+                applyTimelineShift(delta)
+                customShiftInput.text.clear()
             }
-        }
-        customShiftRow.addView(customShiftInput)
-        customShiftRow.addView(Button(this).apply {
-            text = "应用毫秒"
-            setTextColor(Color.WHITE)
-            setBackgroundColor(Color.parseColor("#6A1B9A"))
-            textSize = 11f
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44)).apply {
-                topMargin = dp(6)
-            }
-            setOnClickListener {
-                val delta = customShiftInput.text.toString().trim().toLongOrNull()
-                if (delta == null) {
-                    Toast.makeText(this@LyricDetailActivity, "请输入有效的毫秒数", Toast.LENGTH_SHORT).show()
-                } else {
-                    applyTimelineShift(delta)
-                    customShiftInput.text.clear()
-                }
-            }
-        })
-        timelineCard.addView(customShiftRow)
+        }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = ui.dp(8) })
+        shiftActions.addView(ui.button("撤销位移") { resetTimelineShift() }, LinearLayout.LayoutParams(0, -2, 1f))
+        timeline.addView(shiftActions)
 
-        timelineCard.addView(Button(this).apply {
-            text = "撤销本次位移"
-            setTextColor(Color.parseColor("#CE93D8"))
-            setBackgroundColor(Color.parseColor("#2B1B30"))
-            textSize = 11f
-            setOnClickListener { resetTimelineShift() }
-        })
-        content.addView(timelineCard)
-
-        addSpacer(content, dp(12))
-
-        // Action Buttons Row
-        val buttonRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            )
-        }
-
-        saveBtn = Button(this).apply {
-            text = "💾 保存修改"
-            setTextColor(Color.WHITE)
-            setBackgroundColor(Color.parseColor("#1565C0"))
-            textSize = 13f
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                marginEnd = dp(6)
-            }
-            setOnClickListener { handleSave() }
-        }
-        buttonRow.addView(saveBtn)
-
-        redownloadBtn = Button(this).apply {
-            text = "🔄 在线重下"
-            setTextColor(Color.WHITE)
-            setBackgroundColor(Color.parseColor("#2E7D32"))
-            textSize = 13f
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                marginEnd = dp(6)
-            }
-            setOnClickListener { handleRedownload() }
-        }
-        buttonRow.addView(redownloadBtn)
-
-        deleteBtn = Button(this).apply {
-            text = "🗑️ 删除"
-            setTextColor(Color.parseColor("#EF9A9A"))
-            setBackgroundColor(Color.parseColor("#372020"))
-            textSize = 13f
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.8f)
-            setOnClickListener { handleDelete() }
-        }
-        buttonRow.addView(deleteBtn)
-        content.addView(buttonRow)
-
-        addSpacer(content, dp(12))
-
-        // Editor Card
-        val editorLabel = TextView(this).apply {
-            text = "📝 原始 LRC 歌词文本 (支持编辑后保存)"
-            setTextColor(Color.parseColor("#FFB74D"))
-            textSize = 14f
-            typeface = Typeface.DEFAULT_BOLD
-            setPadding(0, 0, 0, dp(8))
-        }
-        content.addView(editorLabel)
-
-        lrcEditText = EditText(this).apply {
-            hint = "暂无歌词，可先搜索，或在此粘贴、编辑 LRC 歌词后保存"
-            setTextColor(Color.parseColor("#ECEFF1"))
-            setHintTextColor(Color.parseColor("#546E7A"))
-            setBackgroundColor(Color.parseColor("#181818"))
+        val editor = ui.paddedContent(ui.section(content, "歌词编辑"))
+        editor.addView(ui.label("LRC 文本", 18f, bold = true))
+        ui.hint(editor, "可直接粘贴或编辑带时间戳的歌词，保存后同步至本地缓存。")
+        lrcEditText = ui.input("暂无歌词，可先搜索或在此粘贴 LRC 歌词", multiline = true).apply {
             typeface = Typeface.MONOSPACE
-            textSize = 13f
-            setPadding(dp(12), dp(12), dp(12), dp(12))
+            textSize = 14f
             gravity = Gravity.TOP or Gravity.START
-            minLines = 15
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            )
+            minLines = 12
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
         }
-        content.addView(lrcEditText)
-
+        editor.addView(lrcEditText)
         lrcEditText.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
@@ -418,13 +181,15 @@ class LyricDetailActivity : Activity() {
             }
             override fun afterTextChanged(s: Editable?) = Unit
         })
-
-        applyWindowInsets(root, topBar, content)
-
-        setContentView(root)
-        root.requestApplyInsets()
+        saveBtn = ui.button("保存修改", prominent = true) { handleSave() }
+        editor.addView(saveBtn, LinearLayout.LayoutParams(-1, -2))
+        val actions = ui.row()
+        redownloadBtn = ui.button("重新下载") { handleRedownload() }
+        deleteBtn = ui.button("删除缓存", destructive = true) { handleDelete() }
+        actions.addView(redownloadBtn, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = ui.dp(8) })
+        actions.addView(deleteBtn, LinearLayout.LayoutParams(0, -2, 1f))
+        editor.addView(actions, LinearLayout.LayoutParams(-1, -2).apply { topMargin = ui.dp(10) })
     }
-
     private fun applyTimelineShift(deltaMs: Long) {
         if (isFetching) return
         if (lrcEditText.text.toString().isBlank()) return
@@ -450,30 +215,14 @@ class LyricDetailActivity : Activity() {
         shiftValueView.text = "本次未位移"
     }
 
-    private fun applyWindowInsets(root: View, topBar: View, content: View) {
-        root.setOnApplyWindowInsetsListener { _, insets ->
-            val bars = insets.getInsets(WindowInsets.Type.systemBars())
-            topBar.setPadding(dp(16), dp(16) + bars.top, dp(16), dp(12))
-            content.setPadding(dp(16), dp(16), dp(16), dp(24) + bars.bottom)
-            insets
-        }
-    }
-
     private fun populateData() {
         val entry = currentEntry ?: return
         titleView.text = entry.title
         artistView.text = entry.artist
 
         sourceBadge.text = entry.displaySource
-        when (entry.displaySource) {
-            "下载失败" -> sourceBadge.setBackgroundColor(Color.parseColor("#8D6E63"))
-            "LRCLIB" -> sourceBadge.setBackgroundColor(Color.parseColor("#1565C0"))
-            "网易云" -> sourceBadge.setBackgroundColor(Color.parseColor("#C62828"))
-            "酷狗" -> sourceBadge.setBackgroundColor(Color.parseColor("#00838F"))
-            "自定义编辑" -> sourceBadge.setBackgroundColor(Color.parseColor("#E65100"))
-            else -> sourceBadge.setBackgroundColor(Color.parseColor("#455A64"))
-        }
-
+        sourceBadge.setTextColor(if (entry.hasLyrics) ui.primary else ui.error)
+        sourceBadge.background = ui.shape(if (entry.hasLyrics) ui.primaryContainer else ui.errorContainer, 6)
         val dateStr = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(entry.updatedAt))
         val durationStr = if (entry.durationMs > 0) {
             val totalSec = entry.durationMs / 1000
@@ -507,9 +256,9 @@ class LyricDetailActivity : Activity() {
             currentEntry = dbHelper.get(cacheKey)
             populateData()
             setResult(RESULT_OK)
-            Toast.makeText(this, "✅ 歌词保存成功，已同步至本地缓存！", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "歌词保存成功，已同步至本地缓存", Toast.LENGTH_SHORT).show()
         } else {
-            Toast.makeText(this, "❌ 保存失败，请重试", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "保存失败，请重试", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -538,12 +287,11 @@ class LyricDetailActivity : Activity() {
         if (lrcEditText.text.toString() == currentEntry?.rawLrc) {
             action()
         } else {
-            AlertDialog.Builder(this)
+            ui.showDialog(AlertDialog.Builder(this)
                 .setTitle("替换未保存的修改？")
                 .setMessage("获取成功后将替换编辑框中未保存的歌词，获取失败时保留现有内容。")
                 .setPositiveButton("继续") { _, _ -> action() }
-                .setNegativeButton("取消", null)
-                .show()
+                .setNegativeButton("取消", null))
         }
     }
 
@@ -590,6 +338,21 @@ class LyricDetailActivity : Activity() {
         searchBtn.text = if (fetching) "检索中…" else "搜索歌词"
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        if (::lrcEditText.isInitialized) {
+            outState.putString("searchTitle", searchTitleInput.text.toString())
+            outState.putString("searchArtist", searchArtistInput.text.toString())
+            outState.putString("draft", lrcEditText.text.toString())
+            outState.putInt("selection", lrcEditText.selectionStart)
+            outState.putString("shiftBase", shiftBaseLrc)
+            outState.putLong("shiftMs", appliedShiftMs)
+            outState.putString("pendingLrc", pendingSearchResult?.first)
+            outState.putString("pendingSource", pendingSearchResult?.second)
+            outState.putString("searchStatus", if (isFetching) "检索已中断，可重新搜索。" else searchStatus.text.toString())
+        }
+        super.onSaveInstanceState(outState)
+    }
+
     override fun onDestroy() {
         bgExecutor.shutdownNow()
         mainHandler.removeCallbacksAndMessages(null)
@@ -597,7 +360,7 @@ class LyricDetailActivity : Activity() {
     }
 
     private fun handleDelete() {
-        AlertDialog.Builder(this)
+        ui.showDialog(AlertDialog.Builder(this)
             .setTitle("确认删除")
             .setMessage("确定要删除这首歌曲的本地歌词缓存吗？删除后下次播放将重新从网络检索。")
             .setPositiveButton("删除") { _, _ ->
@@ -607,19 +370,7 @@ class LyricDetailActivity : Activity() {
                 Toast.makeText(this, "已删除歌词缓存", Toast.LENGTH_SHORT).show()
                 finish()
             }
-            .setNegativeButton("取消", null)
-            .show()
-    }
-
-    private fun addSpacer(parent: LinearLayout, height: Int) {
-        val view = View(this).apply {
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, height)
-        }
-        parent.addView(view)
-    }
-
-    private fun dp(dp: Int): Int {
-        return (dp * resources.displayMetrics.density).toInt()
+            .setNegativeButton("取消", null))
     }
 
     companion object {

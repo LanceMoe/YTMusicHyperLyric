@@ -1,0 +1,13 @@
+<resources>
+    <color name="hyper_background">#F7F7F7</color>
+    <color name="hyper_surface">#FFFFFF</color>
+    <color name="hyper_field">#F0F0F0</color>
+    <color name="hyper_text">#1A1A1A</color>
+    <color name="hyper_secondary">#737373</color>
+    <color name="hyper_primary">#006FFF</color>
+    <color name="hyper_primary_container">#E8F1FF</color>
+    <color name="hyper_error">#C62828</color>
+    <color name="hyper_error_container">#FCECEC</color>
+    <color name="hyper_success">#287D46</color>
+    <color name="hyper_divider">#EEEEEE</color>
+</resources>

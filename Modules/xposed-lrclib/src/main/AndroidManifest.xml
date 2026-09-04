@@ -51,7 +51,7 @@
 
         <provider
             android:name="moe.lance.ytmusiclyric.cache.LyricsCacheProvider"
-            android:authorities="moe.lance.ytmusiclyric.cache"
+            android:authorities="moe.lance.ytmusiclrc.cache"
             android:exported="true" />
     </application>
 </manifest>

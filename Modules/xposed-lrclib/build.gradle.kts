@@ -8,11 +8,11 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "moe.lance.ytmusiclyric"
+        applicationId = "moe.lance.ytmusiclrc"
         minSdk = 33
         targetSdk = 37
         versionCode = 1
-        versionName = "0.2.0"
+        versionName = "0.3.0"
     }
 
     buildTypes {
@@ -41,6 +41,14 @@ android {
 
     buildFeatures {
         compose = true
+    }
+}
+
+androidComponents {
+    onVariants { variant ->
+        variant.outputs.forEach { output ->
+            output.outputFileName.set("ytmusiclrc-${variant.name}.apk")
+        }
     }
 }
 

@@ -172,7 +172,7 @@ class LrclibXposedModule : XposedModule() {
         const val TAG = "YTMusicHyperLyric"
         const val SYSTEM_UI = "com.android.systemui"
         const val YT_MUSIC = "com.google.android.apps.youtube.music"
-        const val MODULE_PACKAGE = "moe.lance.ytmusiclyric"
+        const val MODULE_PACKAGE = "moe.lance.ytmusiclrc"
         const val MAX_REGISTRATION_ATTEMPTS = 5
         val initialized = java.util.concurrent.atomic.AtomicBoolean(false)
     }

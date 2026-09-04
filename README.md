@@ -6,6 +6,7 @@
 [![Framework](https://img.shields.io/badge/Framework-LSPosed%20%7C%20LibXposed%20102-blue.svg)](#工作原理)
 [![Companion](https://img.shields.io/badge/Companion-HyperLyric%20v7.4%2B-orange.svg)](https://github.com/limczhh/HyperLyric)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.3.21-purple.svg)](https://kotlinlang.org)
+[![License](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
 [![Lyric Sources](https://img.shields.io/badge/Sources-LRCLIB%20%7C%20Netease%20%7C%20Kugou-success.svg)](#三源智能兜底聚合)
 
 **专为 YouTube Music 打造的 HyperLyric 高精度实时同步歌词增强模块**  
@@ -56,6 +57,8 @@
   在设置界面可随时浏览歌曲记录（显示歌名、歌手、来源平台或下载失败状态与记录时间），下载失败的歌曲也会保留，支持按歌名/歌手实时搜索过滤、单曲快捷删除与一键全量清空。详情页支持手动修改歌名关键词和歌手进行三源搜索，结果先填入编辑框，保存后关联到原歌曲；也可直接粘贴、编辑 LRC 文本，或一键在线重新下载覆盖。
 - 🛡️ **HyperOS 动态 DEX 兼容补丁**  
   模块内嵌 SystemUI 级 Hook，动态拦截 `BaseDexClassLoader` 并在 ART 加载前将 HyperLyric 释放的插件 DEX 标记为只读，原生解决 HyperOS / Android 14+ 报错拒绝加载可写 DEX 的痛点。
+- 🎨 **Miuix / HyperOS 风格设置界面**
+  使用 Jetpack Compose 构建，并以 Miuix 的主题、卡片、Preference、按钮和输入控件统一设置页与歌词详情页的视觉与交互；自动适配系统深色/浅色主题，不依赖 MIUI 私有 API。
 - 🚗 **车载蓝牙歌词显示 (AVRCP 同步)**  
   支持将精准歌词实时注入 YouTube Music 的 `MediaSession`，通过标准蓝牙 AVRCP 协议向汽车中控屏与仪表盘动态推送滚动歌词。具备蓝牙 A2DP 智能感知（断开或暂停自动还原歌名）、多展示槽位（标题替换/拼接/歌手/专辑）与毫秒级延迟微调。
 
@@ -115,6 +118,26 @@ flowchart TD
 - **Xposed 框架**：[LSPosed](https://github.com/mywalkb/LSPosed_mod) 或兼容现代 LibXposed 规范的框架
 - **宿主应用**：[HyperLyric](https://github.com/limczhh/HyperLyric)（推荐 v7.4 及以上版本）
 - **播放器**：[YouTube Music](https://play.google.com/store/apps/details?id=com.google.android.apps.youtube.music)（官方版或 Revanced 等第三方修改版均可）
+
+---
+
+## 🎨 Miuix 界面
+
+模块的设置与歌词管理界面基于 [Miuix](https://github.com/compose-miuix-ui/miuix) 的 Compose 原生组件构建，主要使用：
+
+- `miuix-ui-android:0.9.1`：Miuix 主题、基础组件、卡片、按钮和滚动行为；
+- `miuix-preference-android:0.9.1`：开关、单选和带箭头的偏好设置项；
+- `MiuixTheme.kt`：统一 HyperOS 风格配色，并根据系统深浅色模式切换颜色方案；
+- `MiuixSettingsScreen.kt` 与 `MiuixLyricDetailScreen.kt`：分别承载模块设置、缓存管理和 LRC 编辑功能。
+
+界面中使用的 Miuix 导航图标已转换为 Android VectorDrawable，并在模块资源目录中保留对应授权与来源说明：[`Modules/xposed-lrclib/src/main/assets/licenses/miuix/`](Modules/xposed-lrclib/src/main/assets/licenses/miuix/)。
+
+对应 Gradle 依赖如下：
+
+```kotlin
+implementation("top.yukonga.miuix.kmp:miuix-ui-android:0.9.1")
+implementation("top.yukonga.miuix.kmp:miuix-preference-android:0.9.1")
+```
 
 ---
 
@@ -262,10 +285,12 @@ adb logcat -b all -v time -s YTMusicHyperLyric:V HyperLyric:V '*:S'
 - [LRCLIB](https://lrclib.net/)：纯粹、开放且高质量的开放社区同步歌词服务
 - [LibXposed](https://github.com/libxposed/api)：现代、轻量的下一代 Xposed 接口标准
 - [OpenCC](https://github.com/BYVoid/OpenCC)：中文简繁转换标准字形映射
+- [Miuix](https://github.com/compose-miuix-ui/miuix)：面向 Compose Multiplatform 的 HyperOS 风格 UI 组件库
 
 ---
 
 ## 📄 许可证与免责声明
 
-- 本项目采用开源协议授权，源码仅供个人学习、技术研究与 Android 系统交互实验使用。
+- 本项目原创代码采用 [GNU General Public License v3.0](LICENSE) 授权。你可以在遵守 GPL v3 条款的前提下使用、修改和分发本项目。
+- Miuix 依赖及改编的导航图标遵循其各自的 Apache-2.0 授权，相关版权与来源说明见 [`Modules/xposed-lrclib/src/main/assets/licenses/miuix/`](Modules/xposed-lrclib/src/main/assets/licenses/miuix/)。其他第三方依赖仍以其自身许可证为准。
 - 模块抓取的所有歌词文本、音乐元数据版权均归原音乐平台、词曲作者及版权所有方所有，模块本身不存储、不分发任何受版权保护的音源或商业数据。

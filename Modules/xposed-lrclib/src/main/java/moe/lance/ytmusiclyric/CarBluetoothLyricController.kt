@@ -37,6 +37,7 @@ class CarBluetoothLyricController(
     @Volatile private var currentKey: String? = null
     @Volatile private var bluetoothTracker: BluetoothStateTracker? = null
     @Volatile private var prefs: SharedPreferences? = null
+    @Volatile private var application: Application? = null
 
     private val ticker = CarLyricTicker { newMetadata ->
         val session = activeSession ?: return@CarLyricTicker
@@ -90,6 +91,7 @@ class CarBluetoothLyricController(
 
     private fun initApplication(app: Application) {
         if (!initialized.compareAndSet(false, true)) return
+        application = app
         Log.i(LrclibXposedModule.TAG, "Initializing CarBluetoothLyricController in YT Music (${app.packageName})")
 
         // Load config from remote preferences
@@ -153,7 +155,7 @@ class CarBluetoothLyricController(
 
             executor.execute {
                 val lines = runCatching {
-                    LyricsRepository.getLyrics(title, artist, album, duration)
+                    LyricsRepository.getLyrics(title, artist, album, duration, application)
                 }.onFailure { error ->
                     Log.w(LrclibXposedModule.TAG, "Car lyric lookup failed for '$title' — '$artist'", error)
                 }.getOrNull()

@@ -260,7 +260,7 @@ private class YtMusicLyricsBridge(
 
         executor.execute {
             val lines = runCatching {
-                LyricsRepository.getLyrics(title, artist, album, duration)
+                LyricsRepository.getLyrics(title, artist, album, duration, app)
             }.onFailure { error ->
                 Log.w(LrclibXposedModule.TAG, "Lyric lookup failed for '$title' — '$artist'", error)
             }.getOrNull()

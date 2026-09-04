@@ -7,6 +7,14 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.darkColorScheme
 import top.yukonga.miuix.kmp.theme.lightColorScheme
 
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import top.yukonga.miuix.kmp.basic.Text
+
 /** Shared HyperOS / Miuix palette for every user-facing screen in the module. */
 @Composable
 internal fun HyperLyricTheme(content: @Composable () -> Unit) {
@@ -38,3 +46,22 @@ internal fun HyperLyricTheme(content: @Composable () -> Unit) {
         content = content,
     )
 }
+
+/** Standard Miuix / HyperOS section header for cards. */
+@Composable
+internal fun MiuixSectionTitle(
+    text: String,
+    modifier: Modifier = Modifier,
+    isFirst: Boolean = false,
+) {
+    Text(
+        text = text,
+        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        fontSize = 13.sp,
+        fontWeight = FontWeight.SemiBold,
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(start = 10.dp, top = if (isFirst) 8.dp else 22.dp, bottom = 8.dp),
+    )
+}
+

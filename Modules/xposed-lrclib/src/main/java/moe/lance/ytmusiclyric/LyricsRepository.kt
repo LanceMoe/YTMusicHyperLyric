@@ -50,6 +50,20 @@ internal object LyricsRepository {
                     )
                     cache[cacheKey] = lines
                     pruneCacheIfNeeded()
+
+                    // If cached entry had missing/zero duration, upgrade it in persistent DB
+                    if (localEntry.durationMs <= 0L && durationMs > 0L) {
+                        val upgradedEntry = localEntry.copy(
+                            cacheKey = cacheKey,
+                            durationMs = durationMs,
+                            updatedAt = System.currentTimeMillis(),
+                        )
+                        LyricsCacheClient.save(context, upgradedEntry)
+                        if (localEntry.cacheKey != cacheKey) {
+                            LyricsCacheClient.delete(context, localEntry.cacheKey)
+                        }
+                    }
+
                     return lines
                 }
             }
@@ -150,11 +164,16 @@ internal object LyricsRepository {
         return null
     }
 
-    fun buildCacheKey(title: String, artist: String, durationMs: Long): String {
+    fun buildCacheKeyPrefix(title: String, artist: String): String {
         val cleanA = LyricsNormalizer.cleanArtist(artist)
         val normTitle = ChineseConverter.normalize(LyricsNormalizer.cleanTitle(title, cleanA))
         val normArtist = ChineseConverter.normalize(cleanA)
-        return "$normTitle\u0000$normArtist\u0000${durationMs / 5_000}"
+        return "$normTitle\u0000$normArtist\u0000"
+    }
+
+    fun buildCacheKey(title: String, artist: String, durationMs: Long): String {
+        val prefix = buildCacheKeyPrefix(title, artist)
+        return "$prefix${durationMs / 5_000}"
     }
 
     fun evictFromMemory(cacheKey: String) {

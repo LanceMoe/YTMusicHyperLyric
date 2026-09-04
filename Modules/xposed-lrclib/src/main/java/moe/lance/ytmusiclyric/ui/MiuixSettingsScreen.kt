@@ -1,17 +1,22 @@
 package moe.lance.ytmusiclyric.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
@@ -25,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
@@ -51,6 +57,7 @@ import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.basic.ArrowRight
 import top.yukonga.miuix.kmp.icon.basic.Search
 import top.yukonga.miuix.kmp.icon.basic.SearchCleanup
 import top.yukonga.miuix.kmp.preference.ArrowPreference
@@ -313,7 +320,7 @@ private fun SettingsContent(
     onRestartSystemUi: () -> Unit,
     onTestSearch: () -> Unit,
 ) {
-    Section(title = "车载蓝牙歌词") {
+    Section(title = "车载蓝牙歌词", isFirst = true) {
         SwitchPreference(
             checked = state.config.enabled,
             onCheckedChange = { onConfigChanged(state.config.copy(enabled = it)) },
@@ -386,22 +393,58 @@ private fun SettingsContent(
                     .padding(top = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                listOf(
-                    "−500" to -500L,
-                    "−200" to -200L,
-                    "重置" to 0L,
-                    "+200" to 200L,
-                    "+500" to 500L,
-                ).forEach { (label, delta) ->
+                val steps = listOf(
+                    Triple("−", "500", -500L),
+                    Triple("−", "200", -200L),
+                    Triple(null, "重置", 0L),
+                    Triple("+", "200", 200L),
+                    Triple("+", "500", 500L),
+                )
+                steps.forEach { (sign, value, delta) ->
                     Button(
                         onClick = {
                             val newOffset = if (delta == 0L) 0L else (state.config.offsetMs + delta).coerceIn(-5000L, 5000L)
                             onConfigChanged(state.config.copy(offsetMs = newOffset))
                         },
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(46.dp),
+                        minWidth = 0.dp,
+                        minHeight = 0.dp,
+                        insideMargin = PaddingValues(horizontal = 2.dp, vertical = 4.dp),
                         colors = if (delta == 0L) ButtonDefaults.buttonColorsPrimary() else ButtonDefaults.buttonColors(),
                     ) {
-                        Text(label, fontSize = 12.sp)
+                        if (sign != null) {
+                            Column(
+                                modifier = Modifier.fillMaxSize(),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center,
+                            ) {
+                                Text(
+                                    text = sign,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    lineHeight = 13.sp,
+                                )
+                                Text(
+                                    text = value,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    lineHeight = 12.sp,
+                                )
+                            }
+                        } else {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = value,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium,
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -493,99 +536,166 @@ private fun CacheContent(
     onCacheClick: (LyricsCacheEntry) -> Unit,
     onDeleteCache: (LyricsCacheEntry) -> Unit,
 ) {
-    Section(title = "本地歌词记录") {
-        Column(Modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
-            Text(
-                "已缓存的歌词与时间轴校准。点击歌曲可编辑歌词、微调时间轴或手动重新搜索。",
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                fontSize = 13.sp,
-                modifier = Modifier.padding(bottom = 12.dp),
-            )
-            var search by remember { mutableStateOf(TextFieldValue(state.cacheSearch)) }
-            LaunchedEffect(state.cacheSearch) {
-                if (search.text != state.cacheSearch) search = TextFieldValue(state.cacheSearch)
-            }
-            TextField(
-                value = search,
-                onValueChange = {
-                    search = it
-                    onCacheSearchChanged(it.text)
-                },
-                label = "搜索歌名或歌手",
-                useLabelAsPlaceholder = true,
-                leadingIcon = {
-                    Icon(
-                        imageVector = MiuixIcons.Basic.Search,
-                        contentDescription = "搜索",
-                        tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    )
-                },
-                trailingIcon = {
-                    if (search.text.isNotEmpty()) {
-                        IconButton(
-                            onClick = {
-                                search = TextFieldValue("")
-                                onCacheSearchChanged("")
-                            }
-                        ) {
-                            Icon(
-                                imageVector = MiuixIcons.Basic.SearchCleanup,
-                                contentDescription = "清空",
-                                tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                            )
-                        }
-                    }
-                },
+    var search by remember { mutableStateOf(TextFieldValue(state.cacheSearch)) }
+    LaunchedEffect(state.cacheSearch) {
+        if (search.text != state.cacheSearch) search = TextFieldValue(state.cacheSearch)
+    }
+
+    MiuixSearchBar(
+        value = search,
+        onValueChange = {
+            search = it
+            onCacheSearchChanged(it.text)
+        },
+        modifier = Modifier.padding(top = 4.dp, bottom = 2.dp),
+    )
+
+    MiuixSectionTitle(
+        text = if (state.cacheSearch.isBlank()) "全部缓存 (${state.cacheCount})" else "搜索结果 (${state.cacheCount})",
+        isFirst = true,
+    )
+
+    if (state.cacheEntries.isEmpty()) {
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 10.dp),
-            )
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 4.dp, bottom = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+                    .padding(horizontal = 24.dp, vertical = 36.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
+                Icon(
+                    imageVector = if (state.cacheSearch.isBlank()) MiuixIcons.Basic.Search else MiuixIcons.Basic.SearchCleanup,
+                    contentDescription = null,
+                    tint = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.35f),
+                    modifier = Modifier.size(40.dp),
+                )
                 Text(
-                    text = if (state.cacheSearch.isBlank()) "共 ${state.cacheCount} 首歌曲"
-                    else "找到 ${state.cacheCount} 首歌曲",
+                    text = if (state.cacheSearch.isBlank()) "暂无歌词缓存" else "未找到匹配歌曲",
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 16.sp,
+                    color = MiuixTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(top = 10.dp),
+                )
+                Text(
+                    text = if (state.cacheSearch.isBlank())
+                        "在 YouTube Music 播放歌曲并检索歌词后，将自动保存在这里供离线使用。"
+                    else
+                        "请检查歌名或歌手关键字拼写是否正确。",
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     fontSize = 13.sp,
+                    textAlign = TextAlign.Center,
+                    lineHeight = 18.sp,
+                    modifier = Modifier.padding(top = 4.dp),
                 )
-                if (state.cacheCount > 0) {
-                    Button(
-                        onClick = onClearCache,
-                        colors = ButtonDefaults.buttonColors(
-                            color = MiuixTheme.colorScheme.errorContainer,
-                            contentColor = MiuixTheme.colorScheme.error,
-                        ),
-                    ) {
-                        Text("清空全部", fontSize = 12.sp)
+            }
+        }
+    } else {
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                state.cacheEntries.forEachIndexed { index, entry ->
+                    CacheEntryRow(
+                        entry = entry,
+                        onClick = { onCacheClick(entry) },
+                        onDelete = { onDeleteCache(entry) },
+                    )
+                    if (index < state.cacheEntries.size - 1) {
+                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
                     }
                 }
             }
-            if (state.cacheCount > state.cacheEntries.size) {
-                Text(
-                    "显示前 ${state.cacheEntries.size} 首，请通过搜索缩小范围",
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    fontSize = 12.sp,
-                    modifier = Modifier.padding(bottom = 6.dp),
+        }
+
+        if (state.cacheCount > state.cacheEntries.size) {
+            Text(
+                text = "显示前 ${state.cacheEntries.size} 首歌曲，可通过上方搜索框快速定位",
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                fontSize = 12.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 10.dp, bottom = 4.dp),
+            )
+        }
+    }
+
+    if (state.cacheSearch.isBlank() && state.cacheCount > 0) {
+        Spacer(Modifier.height(18.dp))
+        Button(
+            onClick = onClearCache,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(44.dp),
+            minWidth = 0.dp,
+            minHeight = 0.dp,
+            colors = ButtonDefaults.buttonColors(
+                color = MiuixTheme.colorScheme.errorContainer,
+                contentColor = MiuixTheme.colorScheme.error,
+            ),
+        ) {
+            Text("清空全部本地歌词缓存", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+        }
+    }
+}
+
+@Composable
+private fun MiuixSearchBar(
+    value: TextFieldValue,
+    onValueChange: (TextFieldValue) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(44.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(MiuixTheme.colorScheme.surfaceContainerHigh)
+            .padding(horizontal = 14.dp),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = MiuixIcons.Basic.Search,
+                contentDescription = "搜索",
+                tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(Modifier.width(10.dp))
+            Box(
+                modifier = Modifier.weight(1f),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                if (value.text.isEmpty()) {
+                    Text(
+                        text = "搜索歌名或歌手…",
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        fontSize = 14.sp,
+                    )
+                }
+                BasicTextField(
+                    value = value,
+                    onValueChange = onValueChange,
+                    singleLine = true,
+                    textStyle = TextStyle(
+                        fontSize = 14.sp,
+                        color = MiuixTheme.colorScheme.onSurface,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
-            if (state.cacheEntries.isEmpty()) {
-                Text(
-                    if (state.cacheSearch.isBlank()) "暂无歌曲记录\n播放 YouTube Music 并检索歌词后，会自动保存在这里。"
-                    else "没有匹配的歌曲\n试试其他歌名或歌手关键词。",
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 32.dp),
-                    textAlign = TextAlign.Center,
-                )
-            } else {
-                state.cacheEntries.forEach { entry ->
-                    CacheEntryCard(entry, onClick = { onCacheClick(entry) }, onDelete = { onDeleteCache(entry) })
+            if (value.text.isNotEmpty()) {
+                IconButton(
+                    onClick = { onValueChange(TextFieldValue("")) },
+                    modifier = Modifier.size(28.dp),
+                ) {
+                    Icon(
+                        imageVector = MiuixIcons.Basic.SearchCleanup,
+                        contentDescription = "清空搜索",
+                        tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        modifier = Modifier.size(16.dp),
+                    )
                 }
             }
         }
@@ -593,28 +703,54 @@ private fun CacheContent(
 }
 
 @Composable
-private fun CacheEntryCard(entry: LyricsCacheEntry, onClick: () -> Unit, onDelete: () -> Unit) {
-    Card(
+private fun CacheEntryRow(entry: LyricsCacheEntry, onClick: () -> Unit, onDelete: () -> Unit) {
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        onClick = onClick,
-        showIndication = true,
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
+                .weight(1f)
+                .padding(end = 8.dp),
         ) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text = entry.title,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 16.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+            Text(
+                text = entry.title,
+                fontWeight = FontWeight.Medium,
+                fontSize = 15.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                color = MiuixTheme.colorScheme.onSurface,
+            )
+            Row(
+                modifier = Modifier.padding(top = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                val (badgeBg, badgeText) = when {
+                    !entry.hasLyrics -> MiuixTheme.colorScheme.errorContainer to MiuixTheme.colorScheme.error
+                    entry.source.contains("网易") || entry.source.contains("Netease", ignoreCase = true) ->
+                        Color(0xFFE8F3FF) to Color(0xFF007DFF)
+                    entry.source.contains("酷狗") || entry.source.contains("Kugou", ignoreCase = true) ->
+                        Color(0xFFE1F8F6) to Color(0xFF009688)
+                    else -> MiuixTheme.colorScheme.primaryContainer to MiuixTheme.colorScheme.onPrimaryContainer
+                }
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(badgeBg)
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                ) {
+                    Text(
+                        text = if (entry.hasLyrics) entry.displaySource else "无歌词",
+                        color = badgeText,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+
                 Text(
                     text = buildString {
                         append(entry.artist.ifBlank { "未知歌手" })
@@ -625,48 +761,40 @@ private fun CacheEntryCard(entry: LyricsCacheEntry, onClick: () -> Unit, onDelet
                     },
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     fontSize = 13.sp,
-                    modifier = Modifier.padding(top = 3.dp),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Row(
-                    modifier = Modifier.padding(top = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(
-                                if (entry.hasLyrics) MiuixTheme.colorScheme.primaryContainer
-                                else MiuixTheme.colorScheme.errorContainer
-                            )
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
-                    ) {
-                        Text(
-                            text = if (entry.hasLyrics) entry.displaySource else "下载失败",
-                            color = if (entry.hasLyrics) MiuixTheme.colorScheme.onPrimaryContainer
-                            else MiuixTheme.colorScheme.error,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium,
-                        )
-                    }
-                }
             }
-            TextButton(
-                text = "删除",
+        }
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            IconButton(
                 onClick = onDelete,
-                colors = ButtonDefaults.textButtonColors(
-                    color = MiuixTheme.colorScheme.error,
-                ),
+                modifier = Modifier.size(36.dp),
+            ) {
+                Icon(
+                    imageVector = MiuixIcons.Basic.SearchCleanup,
+                    contentDescription = "删除缓存",
+                    tint = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.5f),
+                    modifier = Modifier.size(17.dp),
+                )
+            }
+            Icon(
+                imageVector = MiuixIcons.Basic.ArrowRight,
+                contentDescription = "查看详情",
+                tint = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.35f),
+                modifier = Modifier.size(15.dp),
             )
         }
     }
 }
 
 @Composable
-private fun Section(title: String, content: @Composable () -> Unit) {
-    SmallTitle(text = title)
+private fun Section(title: String, isFirst: Boolean = false, content: @Composable () -> Unit) {
+    MiuixSectionTitle(text = title, isFirst = isFirst)
     Card(modifier = Modifier.fillMaxWidth()) { content() }
 }
 

@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -34,6 +35,7 @@ import moe.lance.ytmusiclyric.cache.LyricsCacheEntry
 import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Scaffold
@@ -43,6 +45,7 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.basic.ArrowRight
+import top.yukonga.miuix.kmp.icon.basic.Check
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.window.WindowDialog
 
@@ -112,12 +115,17 @@ internal fun MiuixLyricDetailScreen(
                         }
                     },
                     actions = {
-                        TextButton(
-                            text = "保存",
+                        IconButton(
                             onClick = onSave,
                             enabled = !state.isFetching,
-                            colors = ButtonDefaults.textButtonColorsPrimary(),
-                        )
+                        ) {
+                            Icon(
+                                imageVector = MiuixIcons.Basic.Check,
+                                contentDescription = "保存修改",
+                                tint = if (!state.isFetching) MiuixTheme.colorScheme.primary
+                                else MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.4f),
+                            )
+                        }
                     },
                 )
             },
@@ -130,7 +138,7 @@ internal fun MiuixLyricDetailScreen(
                     .padding(horizontal = 16.dp, vertical = 8.dp),
             ) {
                 // 歌曲信息
-                SmallTitle(text = "歌曲信息")
+                MiuixSectionTitle(text = "歌曲信息", isFirst = true)
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
                         Text(state.entry.title, fontSize = 20.sp, fontWeight = FontWeight.Bold)
@@ -168,11 +176,50 @@ internal fun MiuixLyricDetailScreen(
                                 fontSize = 12.sp,
                             )
                         }
+
+                        HorizontalDivider(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 14.dp),
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Button(
+                                onClick = onRedownload,
+                                enabled = !state.isFetching,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(40.dp),
+                                minWidth = 0.dp,
+                                minHeight = 0.dp,
+                                insideMargin = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
+                            ) {
+                                Text("重新下载", fontSize = 13.sp)
+                            }
+                            Button(
+                                onClick = onDelete,
+                                enabled = !state.isFetching,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(40.dp),
+                                minWidth = 0.dp,
+                                minHeight = 0.dp,
+                                insideMargin = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    color = MiuixTheme.colorScheme.errorContainer,
+                                    contentColor = MiuixTheme.colorScheme.error,
+                                ),
+                            ) {
+                                Text("删除缓存", fontSize = 13.sp)
+                            }
+                        }
                     }
                 }
 
                 // 手动检索
-                SmallTitle(text = "手动搜索歌词")
+                MiuixSectionTitle(text = "手动搜索歌词")
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
                         Text("联网查找匹配的歌词", fontWeight = FontWeight.Medium, fontSize = 16.sp)
@@ -228,12 +275,12 @@ internal fun MiuixLyricDetailScreen(
                 }
 
                 // 时间轴校准
-                SmallTitle(text = "时间轴校准")
+                MiuixSectionTitle(text = "时间轴校准")
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
                         Text("整体提前或延后", fontWeight = FontWeight.Medium, fontSize = 16.sp)
                         Text(
-                            "微调整首歌词的起止时间轴。负数提前、正数延后。微调后请点击「保存修改」生效。",
+                            "微调整首歌词的起止时间轴。负数提前、正数延后。微调后请点击右上角“✓”保存。",
                             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                             fontSize = 13.sp,
                             modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
@@ -280,7 +327,12 @@ internal fun MiuixLyricDetailScreen(
                                 Button(
                                     onClick = { onShift(delta) },
                                     enabled = !state.isFetching,
-                                    modifier = Modifier.weight(1f),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(42.dp),
+                                    minWidth = 0.dp,
+                                    minHeight = 0.dp,
+                                    insideMargin = PaddingValues(horizontal = 2.dp, vertical = 4.dp),
                                 ) {
                                     Text(label, fontSize = 12.sp)
                                 }
@@ -336,12 +388,12 @@ internal fun MiuixLyricDetailScreen(
                 }
 
                 // 歌词编辑
-                SmallTitle(text = "歌词编辑")
+                MiuixSectionTitle(text = "歌词编辑")
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
                         Text("LRC 文本", fontWeight = FontWeight.Medium, fontSize = 16.sp)
                         Text(
-                            "可直接粘贴或修改带时间戳的歌词内容，保存后同步至本地缓存。",
+                            "可直接粘贴或修改带时间戳的歌词内容，修改完成后点击右上角“✓”保存。",
                             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                             fontSize = 13.sp,
                             modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
@@ -356,39 +408,6 @@ internal fun MiuixLyricDetailScreen(
                             placeholder = "暂无歌词内容，可先搜索或在此粘贴 LRC 格式歌词",
                             multiline = true,
                         )
-                        Button(
-                            onClick = onSave,
-                            enabled = !state.isFetching,
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.buttonColorsPrimary(),
-                        ) {
-                            Text("保存修改")
-                        }
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 10.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            Button(
-                                onClick = onRedownload,
-                                enabled = !state.isFetching,
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                Text("重新下载")
-                            }
-                            Button(
-                                onClick = onDelete,
-                                enabled = !state.isFetching,
-                                modifier = Modifier.weight(1f),
-                                colors = ButtonDefaults.buttonColors(
-                                    color = MiuixTheme.colorScheme.errorContainer,
-                                    contentColor = MiuixTheme.colorScheme.error,
-                                ),
-                            ) {
-                                Text("删除缓存")
-                            }
-                        }
                     }
                 }
                 Spacer(Modifier.height(32.dp))

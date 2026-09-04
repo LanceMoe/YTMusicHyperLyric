@@ -38,6 +38,7 @@ class CarBluetoothLyricController(
     @Volatile private var bluetoothTracker: BluetoothStateTracker? = null
     @Volatile private var prefs: SharedPreferences? = null
     @Volatile private var application: Application? = null
+    private var pendingZeroDurationRunnable: Runnable? = null
 
     private val ticker = CarLyricTicker { newMetadata ->
         val session = activeSession ?: return@CarLyricTicker
@@ -128,6 +129,8 @@ class CarBluetoothLyricController(
             activeSession = session
 
             if (metadata == null) {
+                pendingZeroDurationRunnable?.let(mainHandler::removeCallbacks)
+                pendingZeroDurationRunnable = null
                 currentKey = null
                 ticker.setSong(null, null)
                 return chain.proceed()
@@ -139,6 +142,8 @@ class CarBluetoothLyricController(
             val duration = metadata.getLong(MediaMetadata.METADATA_KEY_DURATION).coerceAtLeast(0L)
 
             if (title.isBlank() || artist.isBlank()) {
+                pendingZeroDurationRunnable?.let(mainHandler::removeCallbacks)
+                pendingZeroDurationRunnable = null
                 ticker.setSong(metadata, null)
                 return chain.proceed()
             }
@@ -148,32 +153,51 @@ class CarBluetoothLyricController(
                 return chain.proceed()
             }
             currentKey = key
+
+            pendingZeroDurationRunnable?.let(mainHandler::removeCallbacks)
+            pendingZeroDurationRunnable = null
+
             val requestId = sequence.incrementAndGet()
 
             // Reset ticker to original metadata while fetching
             ticker.setSong(metadata, null)
 
-            executor.execute {
-                val lines = runCatching {
-                    LyricsRepository.getLyrics(title, artist, album, duration, application)
-                }.onFailure { error ->
-                    Log.w(LrclibXposedModule.TAG, "Car lyric lookup failed for '$title' — '$artist'", error)
-                }.getOrNull()
+            fun dispatchLookup() {
+                executor.execute {
+                    val lines = runCatching {
+                        LyricsRepository.getLyrics(title, artist, album, duration, application)
+                    }.onFailure { error ->
+                        Log.w(LrclibXposedModule.TAG, "Car lyric lookup failed for '$title' — '$artist'", error)
+                    }.getOrNull()
 
-                mainHandler.post {
-                    if (requestId == sequence.get() && key == currentKey) {
-                        if (!lines.isNullOrEmpty()) {
-                            Log.i(
-                                LrclibXposedModule.TAG,
-                                "Loaded ${lines.size} car lyric lines for: $title — $artist",
-                            )
-                            ticker.setSong(metadata, lines)
-                        } else {
-                            Log.i(LrclibXposedModule.TAG, "No car lyrics found for: $title — $artist")
-                            ticker.setSong(metadata, null)
+                    mainHandler.post {
+                        if (requestId == sequence.get() && key == currentKey) {
+                            if (!lines.isNullOrEmpty()) {
+                                Log.i(
+                                    LrclibXposedModule.TAG,
+                                    "Loaded ${lines.size} car lyric lines for: $title — $artist",
+                                )
+                                ticker.setSong(metadata, lines)
+                            } else {
+                                Log.i(LrclibXposedModule.TAG, "No car lyrics found for: $title — $artist")
+                                ticker.setSong(metadata, null)
+                            }
                         }
                     }
                 }
+            }
+
+            if (duration <= 0L) {
+                val delayedTask = Runnable {
+                    pendingZeroDurationRunnable = null
+                    if (requestId == sequence.get() && key == currentKey) {
+                        dispatchLookup()
+                    }
+                }
+                pendingZeroDurationRunnable = delayedTask
+                mainHandler.postDelayed(delayedTask, 350L)
+            } else {
+                dispatchLookup()
             }
 
             return chain.proceed()
@@ -196,6 +220,8 @@ class CarBluetoothLyricController(
         override fun intercept(chain: Chain): Any? {
             val session = chain.thisObject as? MediaSession
             if (session == activeSession) {
+                pendingZeroDurationRunnable?.let(mainHandler::removeCallbacks)
+                pendingZeroDurationRunnable = null
                 ticker.stop()
                 activeSession = null
             }

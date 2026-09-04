@@ -1,9 +1,9 @@
 package com.lance.ytmusichyperlyric.plugin.lrclib
 
-/** Keeps the original title first, then offers a conservative search variant. */
+/** Keeps the original title first, then offers a clean search variant. */
 internal object LyricsNormalizer {
     private val removableSuffix = Regex(
-        "\\s*(?:[-|:]\\s*)?[\\(\\[]?(?:official audio|official video|music video|lyrics|lyric video|hd)[\\)\\]]?\\s*$",
+        "\\s*(?:[-|:]\\s*)?[\\(\\[\\{【（]?(?:official\\s+(?:music\\s+video|video|audio|mv|visualizer)|music\\s+video|official\\s+lyrics?|lyric\\s+video|lyrics?|audio|visualizer|mv|hd|4k|1080p|live|现场版)[\\)\\]\\}】）]?\\s*$",
         RegexOption.IGNORE_CASE,
     )
 
@@ -18,6 +18,6 @@ internal object LyricsNormalizer {
         .trim()
         .replace(removableSuffix, "")
         .trim()
-        .trim('-', '|', ':')
+        .trim('-', '|', ':', '—')
         .trim()
 }

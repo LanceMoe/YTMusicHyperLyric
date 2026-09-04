@@ -21,21 +21,14 @@ import io.github.proify.lyricon.provider.ConnectionListener
 import io.github.proify.lyricon.provider.LyriconFactory
 import io.github.proify.lyricon.provider.LyriconProvider
 import java.io.File
-import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.URL
-import java.net.URLEncoder
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
-import org.json.JSONArray
-import org.json.JSONObject
 
 /**
  * A conventional LSPosed module. It repairs HyperLyric's ZIP loading boundary on Android/HyperOS
- * and also supports a direct Lyricon provider when Lyricon Central is installed.
+ * and publishes synchronized lyrics via Lyricon Provider to HyperLyric.
  */
 class LrclibXposedModule : XposedModule() {
     override fun onModuleLoaded(param: ModuleLoadedParam) {
@@ -150,11 +143,8 @@ class LrclibXposedModule : XposedModule() {
             Log.i(
                 TAG,
                 "Lyricon provider registration started=$registrationStarted, " +
-                    "active=${provider.service.isActive}; waiting for connection"
+                    "active=${provider.service.isActive}; waiting for connection",
             )
-            // Lyricon Core and this module are both initialized from Application.onCreate.
-            // Retry after Core has registered its bridge receiver in case our first broadcast
-            // wins the startup race.
             registrationHandler.postDelayed({ retryRegistration("startup") }, 750L)
         }.onFailure { error ->
             initialized.set(false)
@@ -178,10 +168,9 @@ private class YtMusicLyricsBridge(
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val executor: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
-        Thread(runnable, "ytmusic-lrclib").apply { isDaemon = true }
+        Thread(runnable, "ytmusic-lyrics").apply { isDaemon = true }
     }
     private val sequence = AtomicLong(0)
-    private val lyricsCache = ConcurrentHashMap<String, List<RichLyricLine>>()
 
     @Volatile private var activeToken: MediaSession.Token? = null
     @Volatile private var activeController: MediaController? = null
@@ -247,31 +236,24 @@ private class YtMusicLyricsBridge(
             return
         }
 
-        val key = "$title\\u0000$artist\\u0000$album\\u0000$duration"
+        val key = "$title\u0000$artist\u0000$album\u0000$duration"
         if (key == currentKey) return
         currentKey = key
         val request = sequence.incrementAndGet()
         provider.player.setSong(null)
-        lyricsCache[key]?.let { lines ->
-            publishIfCurrent(request, key, title, artist, duration, lines, controller)
-            return
-        }
 
         executor.execute {
             val lines = runCatching {
-                LrclibDirectClient.fetch(title, artist, album, duration)
-                    ?.let { LrcToLyricon.parse(it, duration) }
+                LyricsRepository.getLyrics(title, artist, album, duration)
             }.onFailure { error ->
-                Log.w(LrclibXposedModule.TAG, "LRCLIB lookup failed", error)
+                Log.w(LrclibXposedModule.TAG, "Lyric lookup failed for '$title' — '$artist'", error)
             }.getOrNull()
+
             if (lines.isNullOrEmpty()) {
-                Log.i(LrclibXposedModule.TAG, "No timed LRCLIB lyrics: $title — $artist")
+                Log.i(LrclibXposedModule.TAG, "No timed lyrics found across providers: $title — $artist")
                 return@execute
             }
-            lyricsCache[key] = lines
-            while (lyricsCache.size > 32) {
-                lyricsCache.keys.firstOrNull()?.let(lyricsCache::remove) ?: break
-            }
+
             mainHandler.post {
                 publishIfCurrent(request, key, title, artist, duration, lines, controller)
             }
@@ -289,137 +271,17 @@ private class YtMusicLyricsBridge(
     ) {
         if (request != sequence.get() || key != currentKey || controller.sessionToken != activeToken) return
         val accepted = provider.player.setSong(
-            Song(id = key, name = title, artist = artist, duration = duration, lyrics = lines)
+            Song(id = key, name = title, artist = artist, duration = duration, lyrics = lines),
         )
         controller.playbackState?.let(::publishPlayback)
         Log.i(
             LrclibXposedModule.TAG,
-            "Published ${lines.size} LRCLIB lines: $title — $artist; " +
-                "accepted=$accepted active=${provider.service.isActive}"
+            "Published ${lines.size} lyric lines: $title — $artist; " +
+                "accepted=$accepted active=${provider.service.isActive}",
         )
     }
 
     private fun publishPlayback(state: PlaybackState) {
-        // Keep Lyricon's automatic playback-state synchronization enabled. Passing only the
-        // boolean state and a point-in-time position switches CachedRemotePlayer to manual mode,
-        // which stops advancing the timeline when no new MediaSession callback arrives (for
-        // example after YT Music goes to the background).
         provider.player.setPlaybackState(state)
     }
-}
-
-private object LrclibDirectClient {
-    private const val GET = "https://lrclib.net/api/get"
-    private const val SEARCH = "https://lrclib.net/api/search"
-    private const val TIMEOUT_MS = 10_000
-
-    fun fetch(title: String, artist: String, album: String, durationMs: Long): String? {
-        request(GET, buildList {
-            add("track_name" to title)
-            add("artist_name" to artist)
-            album.takeIf(String::isNotBlank)?.let { add("album_name" to it) }
-            durationMs.takeIf { it > 0 }?.let { add("duration" to (it / 1_000.0).toString()) }
-        })?.let { JSONObject(it).optString("syncedLyrics").takeIf(::hasLyrics) }?.let { return it }
-
-        val candidates = request(SEARCH, listOf("q" to "$title $artist"))
-            ?.let(::JSONArray)
-            ?.let { response ->
-                buildList {
-                    for (index in 0 until response.length()) {
-                        val item = response.optJSONObject(index) ?: continue
-                        val lyrics = item.optString("syncedLyrics").takeIf(::hasLyrics) ?: continue
-                        add(
-                            SearchCandidate(
-                                item.optString("trackName"),
-                                item.optString("artistName"),
-                                item.optDouble("duration", Double.NaN).takeUnless(Double::isNaN)?.times(1_000)?.toLong(),
-                                lyrics,
-                            ),
-                        )
-                    }
-                }
-            }.orEmpty()
-        return candidates.best(title, artist, durationMs)?.lyrics
-    }
-
-    private fun request(endpoint: String, params: List<Pair<String, String>>): String? {
-        val query = params.joinToString("&") { (key, value) -> "$key=${URLEncoder.encode(value, Charsets.UTF_8.name())}" }
-        val connection = (URL("$endpoint?$query").openConnection() as HttpURLConnection)
-        return try {
-            connection.requestMethod = "GET"
-            connection.connectTimeout = TIMEOUT_MS
-            connection.readTimeout = TIMEOUT_MS
-            connection.setRequestProperty("Accept", "application/json")
-            connection.setRequestProperty("User-Agent", "YTMusicHyperLyric/0.2")
-            if (connection.responseCode != HttpURLConnection.HTTP_OK) return null
-            connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText().takeIf { body -> body.length <= 1_000_000 } }
-        } catch (_: IOException) {
-            null
-        } finally {
-            connection.disconnect()
-        }
-    }
-
-    private fun hasLyrics(value: String) = value.isNotBlank() && value != "null"
-
-    private data class SearchCandidate(val title: String, val artist: String, val duration: Long?, val lyrics: String)
-
-    private fun List<SearchCandidate>.best(title: String, artist: String, duration: Long): SearchCandidate? {
-        fun normal(value: String) = value.lowercase().replace(Regex("[^\\p{L}\\p{N}]+"), "")
-        val expectedTitle = normal(title)
-        val expectedArtist = normal(artist)
-        return mapNotNull { candidate ->
-            val candidateTitle = normal(candidate.title)
-            val candidateArtist = normal(candidate.artist)
-            val titleScore = when {
-                candidateTitle == expectedTitle -> 100
-                candidateTitle.contains(expectedTitle) || expectedTitle.contains(candidateTitle) -> 70
-                else -> 0
-            }
-            val artistScore = when {
-                candidateArtist == expectedArtist -> 60
-                candidateArtist.contains(expectedArtist) || expectedArtist.contains(candidateArtist) -> 45
-                else -> 0
-            }
-            if (titleScore == 0 || artistScore == 0) null
-            else candidate to (titleScore + artistScore + when {
-                duration <= 0 || candidate.duration == null -> 0
-                kotlin.math.abs(duration - candidate.duration) <= 2_000 -> 30
-                kotlin.math.abs(duration - candidate.duration) <= 10_000 -> 20
-                kotlin.math.abs(duration - candidate.duration) <= 30_000 -> 5
-                else -> -20
-            })
-        }.filter { (_, score) -> score >= 120 }.maxByOrNull { (_, score) -> score }?.first
-    }
-}
-
-private object LrcToLyricon {
-    private val timestamp = Regex("\\[(\\d{1,3}):(\\d{2})(?:[.:](\\d{1,3}))?]")
-    private val offset = Regex("^\\s*\\[offset\\s*:\\s*(-?\\d+)\\s*]\\s*$", RegexOption.IGNORE_CASE)
-
-    fun parse(lrc: String, durationMs: Long): List<RichLyricLine>? {
-        val offsetMs = lrc.lineSequence().mapNotNull { offset.matchEntire(it)?.groupValues?.get(1)?.toLongOrNull() }.firstOrNull() ?: 0
-        val raw = buildList {
-            lrc.lineSequence().forEach { line ->
-                val matches = timestamp.findAll(line).toList()
-                val text = matches.lastOrNull()?.let { line.substring(it.range.last + 1).trim() }.orEmpty()
-                if (text.isBlank()) return@forEach
-                matches.forEach { match ->
-                    val minutes = match.groupValues[1].toLongOrNull() ?: return@forEach
-                    val seconds = match.groupValues[2].toLongOrNull() ?: return@forEach
-                    val fraction = match.groupValues[3]
-                    val millis = when (fraction.length) { 1 -> fraction.toLong() * 100; 2 -> fraction.toLong() * 10; 3 -> fraction.toLong(); else -> 0 }
-                    add(RawLine((minutes * 60_000 + seconds * 1_000 + millis + offsetMs).coerceAtLeast(0), text))
-                }
-            }
-        }.sortedBy(RawLine::begin).distinctBy { it.begin to it.text }
-        if (raw.isEmpty()) return null
-        return raw.mapIndexed { index, line ->
-            val next = raw.getOrNull(index + 1)?.begin
-            val end = maxOf(next ?: durationMs.takeIf { it > line.begin } ?: (line.begin + 5_000), line.begin + 1)
-            RichLyricLine(begin = line.begin, end = end, duration = end - line.begin, text = line.text)
-        }
-    }
-
-    private data class RawLine(val begin: Long, val text: String)
 }

@@ -4,7 +4,7 @@ import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
 
-/** Stable LSPosed settings entry, independent from the optional desktop launcher. */
+/** Stable settings entry for LSPosed and installers, independent from the desktop launcher. */
 class ModuleSettingsActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

@@ -13,7 +13,7 @@
             android:label="YouTube Music HyperLyric"
             android:exported="true" />
 
-        <!-- Keep this component enabled: LSPosed can always use it after the launcher is hidden. -->
+        <!-- Keep this entry enabled for LSPosed and the installer's Open button. -->
         <activity
             android:name="moe.lance.ytmusiclyric.ui.ModuleSettingsActivity"
             android:label="YouTube Music HyperLyric 设置"
@@ -23,6 +23,11 @@
                 <action android:name="android.intent.action.MAIN" />
                 <action android:name="android.intent.action.APPLICATION_PREFERENCES" />
                 <category android:name="de.robv.android.xposed.category.MODULE_SETTINGS" />
+            </intent-filter>
+            <intent-filter>
+                <!-- getLaunchIntentForPackage resolves INFO without a desktop icon. -->
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.INFO" />
             </intent-filter>
         </activity>
 

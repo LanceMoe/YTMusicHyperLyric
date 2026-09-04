@@ -65,14 +65,14 @@ class LyricsDatabaseHelper(context: Context) : SQLiteOpenHelper(
     ): LyricsCacheEntry? {
         // 1. Direct hit by exact cache key
         val exact = get(cacheKey)
-        if (exact != null) return exact
+        if (exact?.hasLyrics == true) return exact
 
         // 2. Fallback: match by title and artist, checking duration tolerance if durationMs > 0
         val db = readableDatabase
         val cursor = db.query(
             TABLE_NAME,
             null,
-            "$COL_TITLE = ? AND $COL_ARTIST = ?",
+            "$COL_TITLE = ? AND $COL_ARTIST = ? AND TRIM($COL_RAW_LRC) != ''",
             arrayOf(cleanTitle, cleanArtist),
             null,
             null,
@@ -86,6 +86,7 @@ class LyricsDatabaseHelper(context: Context) : SQLiteOpenHelper(
         cursor.use {
             while (it.moveToNext()) {
                 val entry = cursorToEntry(it)
+                if (!entry.hasLyrics) continue
                 if (durationMs <= 0L || entry.durationMs <= 0L) {
                     return entry
                 }
@@ -96,12 +97,14 @@ class LyricsDatabaseHelper(context: Context) : SQLiteOpenHelper(
                 }
             }
         }
-        return closest
+        return closest ?: exact
     }
 
     @Synchronized
     fun insertOrUpdate(entry: LyricsCacheEntry): Boolean {
         val db = writableDatabase
+        // A late failed request must never erase lyrics saved by another process.
+        // IGNORE also keeps repeated failures as a single, stable song record.
         val values = ContentValues().apply {
             put(COL_CACHE_KEY, entry.cacheKey)
             put(COL_TITLE, entry.title)
@@ -111,7 +114,8 @@ class LyricsDatabaseHelper(context: Context) : SQLiteOpenHelper(
             put(COL_DURATION_MS, entry.durationMs)
             put(COL_UPDATED_AT, entry.updatedAt)
         }
-        val id = db.insertWithOnConflict(TABLE_NAME, null, values, SQLiteDatabase.CONFLICT_REPLACE)
+        val conflict = if (entry.hasLyrics) SQLiteDatabase.CONFLICT_REPLACE else SQLiteDatabase.CONFLICT_IGNORE
+        val id = db.insertWithOnConflict(TABLE_NAME, null, values, conflict)
         return id != -1L
     }
 
@@ -237,4 +241,3 @@ class LyricsDatabaseHelper(context: Context) : SQLiteOpenHelper(
         }
     }
 }
-

@@ -9,5 +9,7 @@ data class LyricsCacheEntry(
     val source: String,
     val durationMs: Long = 0L,
     val updatedAt: Long = System.currentTimeMillis(),
-)
-
+) {
+    val hasLyrics: Boolean get() = rawLrc.isNotBlank()
+    val displaySource: String get() = if (hasLyrics) source else "下载失败"
+}

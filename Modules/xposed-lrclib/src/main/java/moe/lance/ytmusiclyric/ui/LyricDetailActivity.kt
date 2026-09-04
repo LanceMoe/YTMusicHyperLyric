@@ -47,6 +47,12 @@ class LyricDetailActivity : Activity() {
     private lateinit var saveBtn: Button
     private lateinit var redownloadBtn: Button
     private lateinit var deleteBtn: Button
+    private lateinit var searchTitleInput: EditText
+    private lateinit var searchArtistInput: EditText
+    private lateinit var searchBtn: Button
+    private lateinit var searchStatus: TextView
+    private var pendingSearchResult: Pair<String, String>? = null
+    private var isFetching = false
     private lateinit var shiftValueView: TextView
     private var shiftBaseLrc: String? = null
     private var appliedShiftMs: Long = 0L
@@ -176,6 +182,50 @@ class LyricDetailActivity : Activity() {
         metaCard.addView(badgeRow)
         content.addView(metaCard)
 
+        addSpacer(content, dp(12))
+
+        val searchCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.parseColor("#1E1E1E"))
+            setPadding(dp(16), dp(14), dp(16), dp(14))
+        }
+        searchCard.addView(TextView(this).apply {
+            text = "手动搜索歌词"
+            setTextColor(Color.parseColor("#81C784"))
+            textSize = 14f
+            typeface = Typeface.DEFAULT_BOLD
+        })
+        searchCard.addView(TextView(this).apply {
+            text = "可修改歌名关键词和歌手，也可留空歌手。搜索结果填入下方编辑框，点击“保存修改”后关联到当前歌曲。"
+            setTextColor(Color.parseColor("#9E9E9E"))
+            textSize = 12f
+            setPadding(0, dp(4), 0, dp(8))
+        })
+        fun searchInput(label: String, value: String): EditText = EditText(this).apply {
+            hint = label
+            setText(value)
+            setTextColor(Color.WHITE)
+            setHintTextColor(Color.parseColor("#9E9E9E"))
+            textSize = 14f
+            setSingleLine(true)
+        }
+        searchTitleInput = searchInput("歌名或搜索关键词", currentEntry?.title.orEmpty())
+        searchArtistInput = searchInput("歌手（可留空）", currentEntry?.artist.orEmpty())
+        searchCard.addView(searchTitleInput)
+        searchCard.addView(searchArtistInput)
+        searchBtn = Button(this).apply {
+            text = "搜索歌词"
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.parseColor("#2E7D32"))
+            setOnClickListener { handleManualSearch() }
+        }
+        searchCard.addView(searchBtn)
+        searchStatus = TextView(this).apply {
+            setTextColor(Color.parseColor("#B0BEC5"))
+            textSize = 12f
+        }
+        searchCard.addView(searchStatus)
+        content.addView(searchCard)
         addSpacer(content, dp(12))
 
         // Global timeline shift controls. The shift is applied to every timestamp in the
@@ -341,6 +391,7 @@ class LyricDetailActivity : Activity() {
         content.addView(editorLabel)
 
         lrcEditText = EditText(this).apply {
+            hint = "暂无歌词，可先搜索，或在此粘贴、编辑 LRC 歌词后保存"
             setTextColor(Color.parseColor("#ECEFF1"))
             setHintTextColor(Color.parseColor("#546E7A"))
             setBackgroundColor(Color.parseColor("#181818"))
@@ -375,6 +426,7 @@ class LyricDetailActivity : Activity() {
     }
 
     private fun applyTimelineShift(deltaMs: Long) {
+        if (isFetching) return
         if (lrcEditText.text.toString().isBlank()) return
         if (shiftBaseLrc == null) shiftBaseLrc = lrcEditText.text.toString()
         appliedShiftMs += deltaMs
@@ -387,6 +439,7 @@ class LyricDetailActivity : Activity() {
     }
 
     private fun resetTimelineShift() {
+        if (isFetching) return
         val base = shiftBaseLrc ?: return
         suppressShiftWatcher = true
         lrcEditText.setText(base)
@@ -411,8 +464,9 @@ class LyricDetailActivity : Activity() {
         titleView.text = entry.title
         artistView.text = entry.artist
 
-        sourceBadge.text = entry.source
-        when (entry.source) {
+        sourceBadge.text = entry.displaySource
+        when (entry.displaySource) {
+            "下载失败" -> sourceBadge.setBackgroundColor(Color.parseColor("#8D6E63"))
             "LRCLIB" -> sourceBadge.setBackgroundColor(Color.parseColor("#1565C0"))
             "网易云" -> sourceBadge.setBackgroundColor(Color.parseColor("#C62828"))
             "酷狗" -> sourceBadge.setBackgroundColor(Color.parseColor("#00838F"))
@@ -435,6 +489,8 @@ class LyricDetailActivity : Activity() {
         shiftBaseLrc = null
         appliedShiftMs = 0L
         if (::shiftValueView.isInitialized) shiftValueView.text = "本次未位移"
+        pendingSearchResult = null
+        searchStatus.text = if (entry.hasLyrics) "" else "自动下载失败，可修改关键词重新搜索，或直接填写歌词。"
     }
 
     private fun handleSave() {
@@ -444,7 +500,8 @@ class LyricDetailActivity : Activity() {
             return
         }
 
-        val success = dbHelper.updateLrc(cacheKey, newLrc, "自定义编辑")
+        val source = pendingSearchResult?.takeIf { it.first.trim() == newLrc }?.second ?: "自定义编辑"
+        val success = dbHelper.updateLrc(cacheKey, newLrc, source)
         if (success) {
             LyricsRepository.evictFromMemory(cacheKey)
             currentEntry = dbHelper.get(cacheKey)
@@ -458,34 +515,85 @@ class LyricDetailActivity : Activity() {
 
     private fun handleRedownload() {
         val entry = currentEntry ?: return
-        redownloadBtn.isEnabled = false
-        redownloadBtn.text = "下载中..."
+        confirmReplaceDraft {
+            fetchLyrics(entry.title, entry.artist, entry.durationMs, saveImmediately = true)
+        }
+    }
 
+    private fun handleManualSearch() {
+        val title = searchTitleInput.text.toString().trim()
+        val artist = searchArtistInput.text.toString().trim()
+        if (title.isBlank()) {
+            searchTitleInput.error = "请输入歌名或搜索关键词"
+            return
+        }
+        confirmReplaceDraft {
+            // Manual searches should also find versions with a different duration.
+            fetchLyrics(title, artist, durationMs = 0L, saveImmediately = false)
+        }
+    }
+
+    private fun confirmReplaceDraft(action: () -> Unit) {
+        if (isFetching) return
+        if (lrcEditText.text.toString() == currentEntry?.rawLrc) {
+            action()
+        } else {
+            AlertDialog.Builder(this)
+                .setTitle("替换未保存的修改？")
+                .setMessage("获取成功后将替换编辑框中未保存的歌词，获取失败时保留现有内容。")
+                .setPositiveButton("继续") { _, _ -> action() }
+                .setNegativeButton("取消", null)
+                .show()
+        }
+    }
+
+    private fun fetchLyrics(title: String, artist: String, durationMs: Long, saveImmediately: Boolean) {
+        setFetching(true)
+        searchStatus.text = "正在联网检索歌词…"
         bgExecutor.execute {
-            val result = LyricsRepository.fetchRawFromProviders(
-                title = entry.title,
-                artist = entry.artist,
-                album = "",
-                durationMs = entry.durationMs,
-            )
-
+            val result = runCatching {
+                LyricsRepository.fetchRawFromProviders(title, artist, durationMs = durationMs)
+            }.getOrNull()?.takeIf { it.first.isNotBlank() }
+            if (isDestroyed) return@execute
             mainHandler.post {
-                redownloadBtn.isEnabled = true
-                redownloadBtn.text = "🔄 在线重下"
-
-                if (result != null) {
+                if (isFinishing || isDestroyed) return@post
+                setFetching(false)
+                if (result == null) {
+                    searchStatus.text = "未获取到歌词，请尝试其他关键词或检查网络。"
+                } else if (saveImmediately) {
                     val (newLrc, newSource) = result
-                    dbHelper.updateLrc(cacheKey, newLrc, newSource)
-                    LyricsRepository.evictFromMemory(cacheKey)
-                    currentEntry = dbHelper.get(cacheKey)
-                    populateData()
-                    setResult(RESULT_OK)
-                    Toast.makeText(this@LyricDetailActivity, "✅ 重新下载成功，已更新自 $newSource！", Toast.LENGTH_SHORT).show()
+                    if (dbHelper.updateLrc(cacheKey, newLrc, newSource)) {
+                        LyricsRepository.evictFromMemory(cacheKey)
+                        currentEntry = dbHelper.get(cacheKey)
+                        populateData()
+                        setResult(RESULT_OK)
+                        searchStatus.text = "重新下载成功，已更新自 $newSource。"
+                    } else {
+                        searchStatus.text = "保存失败，请重试。"
+                    }
                 } else {
-                    Toast.makeText(this@LyricDetailActivity, "❌ 未从网络检索到歌词", Toast.LENGTH_SHORT).show()
+                    lrcEditText.setText(result.first)
+                    shiftBaseLrc = null
+                    appliedShiftMs = 0L
+                    shiftValueView.text = "本次未位移"
+                    pendingSearchResult = result
+                    searchStatus.text = "已从 ${result.second} 获取歌词，可在下方编辑；点击“保存修改”后生效。"
                 }
             }
         }
+    }
+
+    private fun setFetching(fetching: Boolean) {
+        isFetching = fetching
+        listOf(searchBtn, redownloadBtn, saveBtn, deleteBtn, searchTitleInput, searchArtistInput, lrcEditText)
+            .forEach { it.isEnabled = !fetching }
+        searchBtn.text = if (fetching) "检索中…" else "搜索歌词"
+    }
+
+    override fun onDestroy() {
+        bgExecutor.shutdownNow()
+        mainHandler.removeCallbacksAndMessages(null)
+        super.onDestroy()
     }
 
     private fun handleDelete() {

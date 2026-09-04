@@ -326,7 +326,7 @@ class SettingsActivity : Activity() {
             addView(headerRow)
 
             val cacheDesc = TextView(this@SettingsActivity).apply {
-                text = "成功匹配的歌词会自动保存在本地，再次播放直接从本地读取不再消耗流量。点击项目可查看/编辑歌词或重新抓取。"
+                text = "成功获取的歌词会保存在本地，下载失败的歌曲也会列出。点击歌曲可手动输入关键词搜索、编辑歌词或重新下载。"
                 setTextColor(Color.parseColor("#9E9E9E"))
                 textSize = 12f
                 setPadding(0, dp(6), 0, dp(10))
@@ -513,7 +513,7 @@ class SettingsActivity : Activity() {
 
     private fun updateCacheUi(count: Int, list: List<LyricsCacheEntry>) {
         if (currentSearchKeyword.isBlank()) {
-            cacheStatsText.text = "共已缓存 $count 首歌曲"
+            cacheStatsText.text = "共记录 $count 首歌曲（含下载失败）"
         } else {
             cacheStatsText.text = "搜索结果: $count 首歌曲 (筛选: \"$currentSearchKeyword\")"
         }
@@ -523,7 +523,7 @@ class SettingsActivity : Activity() {
         if (list.isEmpty()) {
             val emptyView = TextView(this).apply {
                 text = if (currentSearchKeyword.isBlank()) {
-                    "暂无本地缓存歌词。在 YouTube Music 中播放歌曲后将自动缓存。"
+                    "暂无歌曲记录。在 YouTube Music 中播放歌曲并检索歌词后将自动记录。"
                 } else {
                     "未搜索到匹配的本地缓存歌词"
                 }
@@ -592,12 +592,13 @@ class SettingsActivity : Activity() {
         }
 
         val sourceBadge = TextView(this).apply {
-            text = entry.source
+            text = entry.displaySource
             textSize = 10f
             typeface = Typeface.DEFAULT_BOLD
             setPadding(dp(6), dp(1), dp(6), dp(1))
             setTextColor(Color.WHITE)
-            when (entry.source) {
+            when (entry.displaySource) {
+                "下载失败" -> setBackgroundColor(Color.parseColor("#8D6E63"))
                 "LRCLIB" -> setBackgroundColor(Color.parseColor("#1565C0"))
                 "网易云" -> setBackgroundColor(Color.parseColor("#C62828"))
                 "酷狗" -> setBackgroundColor(Color.parseColor("#00838F"))

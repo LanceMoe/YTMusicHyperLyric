@@ -86,6 +86,21 @@ internal object LyricsRepository {
                 return lines
             }
         }
+        // Keep unsuccessful songs available for manual searching and editing.
+        // Empty records are not playable cache hits, so later playback still retries.
+        if (context != null) {
+            LyricsCacheClient.save(
+                context,
+                LyricsCacheEntry(
+                    cacheKey = cacheKey,
+                    title = title,
+                    artist = artist,
+                    rawLrc = "",
+                    source = "下载失败",
+                    durationMs = durationMs,
+                ),
+            )
+        }
         return null
     }
 

@@ -21,8 +21,6 @@ import io.github.proify.lyricon.provider.ConnectionListener
 import io.github.proify.lyricon.provider.LyriconFactory
 import io.github.proify.lyricon.provider.LyriconProvider
 import java.io.File
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 
@@ -183,9 +181,7 @@ private class YtMusicLrcBridge(
     private val provider: LyriconProvider,
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val executor: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
-        Thread(runnable, "ytmusic-lyrics").apply { isDaemon = true }
-    }
+    private val executor = LatestLyricLookup("ytmusic-lyrics")
     private val sequence = AtomicLong(0)
 
     @Volatile private var activeToken: MediaSession.Token? = null
@@ -198,7 +194,18 @@ private class YtMusicLrcBridge(
         selectController(controllers.orEmpty())
     }
 
+    private var observingCache = false
+
     fun start() {
+        if (!observingCache) {
+            observingCache = true
+            moe.lance.ytmusiclrc.cache.LyricsCacheChanges.observe(app) {
+                currentKey = null
+                activeController?.let { controller ->
+                    controller.metadata?.let { onMetadata(controller, it, allowNetwork = false) }
+                }
+            }
+        }
         val manager = app.getSystemService(Context.MEDIA_SESSION_SERVICE) as? MediaSessionManager
             ?: error("MediaSessionManager is unavailable")
         manager.addOnActiveSessionsChangedListener(sessionListener, null, mainHandler)
@@ -209,6 +216,7 @@ private class YtMusicLrcBridge(
         val controller = controllers.firstOrNull { it.packageName == LrclibXposedModule.YT_MUSIC }
         if (controller?.sessionToken == activeToken) return
 
+        executor.cancel()
         pendingZeroDurationRunnable?.let(mainHandler::removeCallbacks)
         pendingZeroDurationRunnable = null
         activeController?.let { old -> activeCallback?.let(old::unregisterCallback) }
@@ -226,7 +234,15 @@ private class YtMusicLrcBridge(
 
         val callback = object : MediaController.Callback() {
             override fun onMetadataChanged(metadata: MediaMetadata?) {
-                metadata?.let { onMetadata(controller, it) }
+                if (metadata != null) onMetadata(controller, metadata)
+                else if (controller.sessionToken == activeToken) {
+                    executor.cancel()
+                    sequence.incrementAndGet()
+                    currentKey = null
+                    pendingZeroDurationRunnable?.let(mainHandler::removeCallbacks)
+                    pendingZeroDurationRunnable = null
+                    provider.player.setSong(null)
+                }
             }
 
             override fun onPlaybackStateChanged(state: PlaybackState?) {
@@ -244,13 +260,18 @@ private class YtMusicLrcBridge(
         Log.i(LrclibXposedModule.TAG, "Using YT Music MediaSession")
     }
 
-    private fun onMetadata(controller: MediaController, metadata: MediaMetadata) {
+    private fun onMetadata(controller: MediaController, incoming: MediaMetadata, allowNetwork: Boolean = true) {
+        val metadata = OriginalSongMetadata.restore(incoming)
         if (controller.sessionToken != activeToken) return
         val title = metadata.getString(MediaMetadata.METADATA_KEY_TITLE)?.trim().orEmpty()
         val artist = metadata.getString(MediaMetadata.METADATA_KEY_ARTIST)?.trim().orEmpty()
         val album = metadata.getString(MediaMetadata.METADATA_KEY_ALBUM)?.trim().orEmpty()
         val duration = metadata.getLong(MediaMetadata.METADATA_KEY_DURATION).coerceAtLeast(0L)
         if (title.isBlank() || artist.isBlank()) {
+            executor.cancel()
+            sequence.incrementAndGet()
+            currentKey = null
+            provider.player.setSong(null)
             Log.d(LrclibXposedModule.TAG, "Skip incomplete metadata: title=$title, artist=$artist")
             return
         }
@@ -259,6 +280,7 @@ private class YtMusicLrcBridge(
         if (key == currentKey) return
         currentKey = key
 
+        executor.cancel()
         pendingZeroDurationRunnable?.let(mainHandler::removeCallbacks)
         pendingZeroDurationRunnable = null
 
@@ -268,7 +290,7 @@ private class YtMusicLrcBridge(
         fun dispatchLookup() {
             executor.execute {
                 val lines = runCatching {
-                    LyricsRepository.getLyrics(title, artist, album, duration, app)
+                    LyricsRepository.getLyrics(title, artist, album, duration, app, allowNetwork)
                 }.onFailure { error ->
                     Log.w(LrclibXposedModule.TAG, "Lyric lookup failed for '$title' — '$artist'", error)
                 }.getOrNull()

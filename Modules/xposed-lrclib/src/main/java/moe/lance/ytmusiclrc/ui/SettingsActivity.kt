@@ -143,7 +143,7 @@ class SettingsActivity : ComponentActivity() {
         val mode = uiState?.config?.displayMode ?: CarBluetoothLyricConfig().displayMode
         updateState { copy(testLoading = true, testError = false, testResult = "正在联网检索，请稍候…") }
         bgExecutor.execute {
-            val result = runCatching { LyricsRepository.getLyrics(title, artist, "", 240_000L, this) }
+            val result = runCatching { LyricsRepository.getLyrics(title, artist, "", 0L, this) }
             mainHandler.post {
                 if (isFinishing || isDestroyed) return@post
                 val lines = result.getOrNull()

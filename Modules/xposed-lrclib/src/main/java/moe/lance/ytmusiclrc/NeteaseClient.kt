@@ -73,6 +73,7 @@ internal object NeteaseClient {
     private fun httpGet(urlStr: String): String? {
         val connection = (URL(urlStr).openConnection() as HttpURLConnection)
         return try {
+            LatestLyricLookup.attach(connection)
             connection.requestMethod = "GET"
             connection.connectTimeout = TIMEOUT_MS
             connection.readTimeout = TIMEOUT_MS
@@ -85,6 +86,7 @@ internal object NeteaseClient {
         } catch (_: IOException) {
             null
         } finally {
+            LatestLyricLookup.detach()
             connection.disconnect()
         }
     }
@@ -96,6 +98,7 @@ internal object NeteaseClient {
         val expectedArtist = ChineseConverter.normalize(artist)
 
         return mapNotNull { candidate ->
+            if (!DurationMatcher.accepts(duration, candidate.durationMs)) return@mapNotNull null
             val candidateTitle = ChineseConverter.normalize(candidate.title)
             val candidateArtist = ChineseConverter.normalize(candidate.artist)
 

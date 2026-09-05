@@ -50,7 +50,7 @@
 - ⏱️ **后台精准进度同步与切歌防抖**  
   - 实时同步 `PlaybackState` 进度与速率，切到后台、锁屏熄屏歌词时间轴均平滑走字，不漂移、不卡顿；
   - 基于单调递增 Sequence 令牌与原子校验，快速切歌时彻底杜绝网络旧请求结果回写覆盖新歌曲（Race Condition）。
-  - 内置 64 条并发 LRU 缓存，切回已播歌曲毫秒级秒开。
+  - 内置 64 条内存缓存（无持久化上下文时使用），切回已播歌曲毫秒级秒开。
 - 💾 **跨进程本地持久化缓存 (`LyricsDatabaseHelper` + `LyricsCacheProvider`)**  
   已成功获取的歌词会自动沉淀至模块本地 SQLite 数据库中，二次播放直接从本地秒开读取，**完全不再从网络重复下载**。通过标准 `ContentProvider` 实现 SystemUI、YouTube Music 与模块设置应用之间毫秒级跨进程安全读写与共享。
 - 📝 **全功能歌词缓存管理与 LRC 文本编辑器**  
@@ -228,6 +228,15 @@ cd YTMusicHyperLyric
 # 编译 Release 版 LSPosed 模块 APK
 .\gradlew.bat :modules:xposed-lrclib:assembleRelease --max-workers=2
 ```
+
+Release 构建必须使用固定签名，不再回退到临时 debug keystore。本地构建前设置
+`RELEASE_STORE_FILE`（建议绝对路径）、`RELEASE_STORE_PASSWORD`、`RELEASE_KEY_ALIAS`、
+`RELEASE_KEY_PASSWORD` 四个环境变量。缺少配置时 Release 构建会明确失败，Debug 与测试不受影响。
+
+GitHub Release 需要仓库 Secrets：`RELEASE_KEYSTORE_BASE64`（同一份 keystore 的 Base64）、
+`RELEASE_STORE_PASSWORD`、`RELEASE_KEY_ALIAS`、`RELEASE_KEY_PASSWORD`。
+请备份并在所有版本间复用同一份私钥，勿提交到仓库。CI 仅在 runner 临时目录解码，构建后清理。
+若需要覆盖安装此前发布的 APK，必须使用该 APK 原来的签名私钥；新的固定私钥无法兼容旧签名。
 
 编译生成的 APK 位于：
 - Debug：`Modules/xposed-lrclib/build/outputs/apk/debug/ytmusiclrc-debug.apk`

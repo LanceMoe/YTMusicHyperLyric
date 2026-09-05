@@ -94,12 +94,30 @@ jobs:
           chmod +x ./gradlew
           ./gradlew test --max-workers=2
 
+      - name: Restore persistent release signing key
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          test -n "$RELEASE_KEYSTORE_BASE64" || { echo "Missing RELEASE_KEYSTORE_BASE64 secret" >&2; exit 1; }
+          printf '%s' "$RELEASE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/ytmusic-release.jks"
+          chmod 600 "$RUNNER_TEMP/ytmusic-release.jks"
+
       - name: Build release APK and plugin ZIP
+        env:
+          RELEASE_STORE_FILE: ${{ runner.temp }}/ytmusic-release.jks
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: |
           ./gradlew \
             :modules:xposed-lrclib:assembleRelease \
             :plugins:lrclib:packagePlugin \
             --max-workers=2
+
+      - name: Remove temporary signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/ytmusic-release.jks"
 
       - name: Collect release assets
         env:

@@ -5,3 +5,7 @@ local.properties
 .idea/
 *.iml
 .vscode/
+
+# Private Android signing material
+*.jks
+*.keystore

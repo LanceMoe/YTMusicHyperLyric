@@ -13,6 +13,7 @@ class LyricsDatabaseHelper(context: Context) : SQLiteOpenHelper(
     null,
     DATABASE_VERSION,
 ) {
+    private val appContext = context.applicationContext
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
@@ -40,7 +41,7 @@ class LyricsDatabaseHelper(context: Context) : SQLiteOpenHelper(
 
     override fun onOpen(db: SQLiteDatabase) {
         super.onOpen(db)
-        runCatching { deduplicateExisting() }
+        deduplicateExisting(db)
     }
 
     @Synchronized
@@ -82,12 +83,13 @@ class LyricsDatabaseHelper(context: Context) : SQLiteOpenHelper(
             ""
         }
 
+        // SQLite text substr stops at NUL; BLOB comparison also needs UTF-8 byte length.
         if (prefix.isNotEmpty()) {
             val prefixCursor = db.query(
                 TABLE_NAME,
                 null,
-                "substr($COL_CACHE_KEY, 1, ?) = ? AND TRIM($COL_RAW_LRC) != ''",
-                arrayOf(prefix.length.toString(), prefix),
+                "substr(CAST($COL_CACHE_KEY AS BLOB), 1, ?) = CAST(? AS BLOB) AND TRIM($COL_RAW_LRC) != ''",
+                arrayOf(prefix.toByteArray(Charsets.UTF_8).size.toString(), prefix),
                 null,
                 null,
                 "$COL_UPDATED_AT DESC",
@@ -166,16 +168,16 @@ class LyricsDatabaseHelper(context: Context) : SQLiteOpenHelper(
         if (entry.hasLyrics && entry.durationMs > 0L && prefix.isNotEmpty()) {
             db.delete(
                 TABLE_NAME,
-                "substr($COL_CACHE_KEY, 1, ?) = ? AND $COL_DURATION_MS <= 0",
-                arrayOf(prefix.length.toString(), prefix),
+                "substr(CAST($COL_CACHE_KEY AS BLOB), 1, ?) = CAST(? AS BLOB) AND $COL_DURATION_MS <= 0",
+                arrayOf(prefix.toByteArray(Charsets.UTF_8).size.toString(), prefix),
             )
         } else if (entry.durationMs <= 0L && prefix.isNotEmpty()) {
             // If saving an entry with durationMs <= 0, check if an entry with full duration already exists.
             val hasBetterEntry = db.query(
                 TABLE_NAME,
                 arrayOf(COL_ID),
-                "substr($COL_CACHE_KEY, 1, ?) = ? AND $COL_DURATION_MS > 0 AND TRIM($COL_RAW_LRC) != ''",
-                arrayOf(prefix.length.toString(), prefix),
+                "substr(CAST($COL_CACHE_KEY AS BLOB), 1, ?) = CAST(? AS BLOB) AND $COL_DURATION_MS > 0 AND TRIM($COL_RAW_LRC) != ''",
+                arrayOf(prefix.toByteArray(Charsets.UTF_8).size.toString(), prefix),
                 null,
                 null,
                 null,
@@ -205,8 +207,9 @@ class LyricsDatabaseHelper(context: Context) : SQLiteOpenHelper(
     }
 
     @Synchronized
-    fun deduplicateExisting(): Int {
-        val db = writableDatabase
+    fun deduplicateExisting(): Int = deduplicateExisting(writableDatabase)
+
+    private fun deduplicateExisting(db: SQLiteDatabase): Int {
         val zeroEntriesCursor = db.query(
             TABLE_NAME,
             arrayOf(COL_ID, COL_CACHE_KEY),
@@ -232,8 +235,8 @@ class LyricsDatabaseHelper(context: Context) : SQLiteOpenHelper(
                     db.query(
                         TABLE_NAME,
                         arrayOf(COL_ID),
-                        "substr($COL_CACHE_KEY, 1, ?) = ? AND $COL_DURATION_MS > 0 AND TRIM($COL_RAW_LRC) != ''",
-                        arrayOf(prefix.length.toString(), prefix),
+                        "substr(CAST($COL_CACHE_KEY AS BLOB), 1, ?) = CAST(? AS BLOB) AND $COL_DURATION_MS > 0 AND TRIM($COL_RAW_LRC) != ''",
+                        arrayOf(prefix.toByteArray(Charsets.UTF_8).size.toString(), prefix),
                         null,
                         null,
                         null,
@@ -273,6 +276,7 @@ class LyricsDatabaseHelper(context: Context) : SQLiteOpenHelper(
             put(COL_UPDATED_AT, System.currentTimeMillis())
         }
         val rows = db.update(TABLE_NAME, values, "$COL_CACHE_KEY = ?", arrayOf(cacheKey))
+        if (rows > 0) LyricsCacheChanges.notify(appContext)
         return rows > 0
     }
 
@@ -280,6 +284,7 @@ class LyricsDatabaseHelper(context: Context) : SQLiteOpenHelper(
     fun delete(cacheKey: String): Boolean {
         val db = writableDatabase
         val rows = db.delete(TABLE_NAME, "$COL_CACHE_KEY = ?", arrayOf(cacheKey))
+        if (rows > 0) LyricsCacheChanges.notify(appContext)
         return rows > 0
     }
 
@@ -287,13 +292,14 @@ class LyricsDatabaseHelper(context: Context) : SQLiteOpenHelper(
     fun deleteById(id: Long): Boolean {
         val db = writableDatabase
         val rows = db.delete(TABLE_NAME, "$COL_ID = ?", arrayOf(id.toString()))
+        if (rows > 0) LyricsCacheChanges.notify(appContext)
         return rows > 0
     }
 
     @Synchronized
     fun deleteAll(): Int {
         val db = writableDatabase
-        return db.delete(TABLE_NAME, null, null)
+        return db.delete(TABLE_NAME, null, null).also { LyricsCacheChanges.notify(appContext) }
     }
 
     @Synchronized

@@ -12,8 +12,6 @@ import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedInterface.Chain
 import io.github.libxposed.api.XposedInterface.Hooker
 import io.github.libxposed.api.XposedModuleInterface.PackageLoadedParam
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
@@ -25,9 +23,7 @@ class CarBluetoothLyricController(
     private val module: XposedInterface,
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val executor: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
-        Thread(runnable, "ytmusic-car-lyric").apply { isDaemon = true }
-    }
+    private val executor = LatestLyricLookup("ytmusic-car-lyric")
 
     private val isInternalUpdate = ThreadLocal.withInitial { false }
     private val sequence = AtomicLong(0)
@@ -101,6 +97,12 @@ class CarBluetoothLyricController(
     private fun initApplication(app: Application) {
         if (!initialized.compareAndSet(false, true)) return
         application = app
+        moe.lance.ytmusiclrc.cache.LyricsCacheChanges.observe(app) {
+            val session = activeSession
+            val metadata = originalMetadata
+            currentKey = null
+            if (session != null) handleMetadata(session, metadata, allowNetwork = false)
+        }
         Log.i(LrclibXposedModule.TAG, "Initializing CarBluetoothLyricController in YT Music (${app.packageName})")
 
         // Load config from remote preferences
@@ -124,89 +126,101 @@ class CarBluetoothLyricController(
         ticker.setBluetoothConnected(tracker.isBluetoothConnected)
     }
 
+    private var originalMetadata: MediaMetadata? = null
+
     private inner class SetMetadataHook : Hooker {
         override fun intercept(chain: Chain): Any? {
-            if (isInternalUpdate.get() == true) {
-                return chain.proceed()
-            }
-
-            val session = chain.thisObject as? MediaSession
+            if (isInternalUpdate.get() == true) return chain.proceed()
+            val session = chain.thisObject as? MediaSession ?: return chain.proceed()
             val metadata = chain.args.firstOrNull() as? MediaMetadata
-            activeSession = session
+            val result = chain.proceed()
+            mainHandler.post { handleMetadata(session, metadata) }
+            return result
+        }
+    }
 
-            if (metadata == null) {
-                pendingZeroDurationRunnable?.let(mainHandler::removeCallbacks)
-                pendingZeroDurationRunnable = null
-                currentKey = null
-                ticker.setSong(null, null)
-                return chain.proceed()
-            }
+    private fun handleMetadata(session: MediaSession, metadata: MediaMetadata?, allowNetwork: Boolean = true) {
+        if (session != activeSession) currentKey = null
+        activeSession = session
+        originalMetadata = metadata
 
-            val title = metadata.getString(MediaMetadata.METADATA_KEY_TITLE)?.trim().orEmpty()
-            val artist = metadata.getString(MediaMetadata.METADATA_KEY_ARTIST)?.trim().orEmpty()
-            val album = metadata.getString(MediaMetadata.METADATA_KEY_ALBUM)?.trim().orEmpty()
-            val duration = metadata.getLong(MediaMetadata.METADATA_KEY_DURATION).coerceAtLeast(0L)
-
-            if (title.isBlank() || artist.isBlank()) {
-                pendingZeroDurationRunnable?.let(mainHandler::removeCallbacks)
-                pendingZeroDurationRunnable = null
-                ticker.setSong(metadata, null)
-                return chain.proceed()
-            }
-
-            val key = "$title\u0000$artist\u0000$album\u0000$duration"
-            if (key == currentKey) {
-                return chain.proceed()
-            }
-            currentKey = key
-
+        if (metadata == null) {
+            sequence.incrementAndGet()
+            executor.cancel()
             pendingZeroDurationRunnable?.let(mainHandler::removeCallbacks)
             pendingZeroDurationRunnable = null
+            currentKey = null
+            ticker.setSong(null, null)
+            return
+        }
 
-            val requestId = sequence.incrementAndGet()
+        val title = metadata.getString(MediaMetadata.METADATA_KEY_TITLE)?.trim().orEmpty()
+        val artist = metadata.getString(MediaMetadata.METADATA_KEY_ARTIST)?.trim().orEmpty()
+        val album = metadata.getString(MediaMetadata.METADATA_KEY_ALBUM)?.trim().orEmpty()
+        val duration = metadata.getLong(MediaMetadata.METADATA_KEY_DURATION).coerceAtLeast(0L)
 
-            // Reset ticker to original metadata while fetching
+        if (title.isBlank() || artist.isBlank()) {
+            sequence.incrementAndGet()
+            currentKey = null
+            executor.cancel()
+            pendingZeroDurationRunnable?.let(mainHandler::removeCallbacks)
+            pendingZeroDurationRunnable = null
             ticker.setSong(metadata, null)
+            return
+        }
 
-            fun dispatchLookup() {
-                executor.execute {
-                    val lines = runCatching {
-                        LyricsRepository.getLyrics(title, artist, album, duration, application)
-                    }.onFailure { error ->
-                        Log.w(LrclibXposedModule.TAG, "Car lyric lookup failed for '$title' — '$artist'", error)
-                    }.getOrNull()
+        val key = "$title\u0000$artist\u0000$album\u0000$duration"
+        if (key == currentKey) {
+            ticker.updateMetadata(metadata)
+            return
+        }
+        currentKey = key
 
-                    mainHandler.post {
-                        if (requestId == sequence.get() && key == currentKey) {
-                            if (!lines.isNullOrEmpty()) {
-                                Log.i(
-                                    LrclibXposedModule.TAG,
-                                    "Loaded ${lines.size} car lyric lines for: $title — $artist",
-                                )
-                                ticker.setSong(metadata, lines)
-                            } else {
-                                Log.i(LrclibXposedModule.TAG, "No car lyrics found for: $title — $artist")
-                                ticker.setSong(metadata, null)
-                            }
+        executor.cancel()
+        pendingZeroDurationRunnable?.let(mainHandler::removeCallbacks)
+        pendingZeroDurationRunnable = null
+
+        val requestId = sequence.incrementAndGet()
+
+        // Reset ticker to original metadata while fetching
+        ticker.setSong(metadata, null)
+
+        fun dispatchLookup() {
+            executor.execute {
+                val lines = runCatching {
+                    LyricsRepository.getLyrics(title, artist, album, duration, application, allowNetwork)
+                }.onFailure { error ->
+                    Log.w(LrclibXposedModule.TAG, "Car lyric lookup failed for '$title' — '$artist'", error)
+                }.getOrNull()
+
+                mainHandler.post {
+                    if (requestId == sequence.get() && key == currentKey && session == activeSession) {
+                        if (!lines.isNullOrEmpty()) {
+                            Log.i(
+                                LrclibXposedModule.TAG,
+                                "Loaded ${lines.size} car lyric lines for: $title — $artist",
+                            )
+                            ticker.setSong(metadata, lines)
+                        } else {
+                            Log.i(LrclibXposedModule.TAG, "No car lyrics found for: $title — $artist")
+                            ticker.setSong(metadata, null)
                         }
                     }
                 }
             }
+        }
 
-            if (duration <= 0L) {
-                val delayedTask = Runnable {
-                    pendingZeroDurationRunnable = null
-                    if (requestId == sequence.get() && key == currentKey) {
-                        dispatchLookup()
-                    }
+        if (duration <= 0L) {
+            val delayedTask = Runnable {
+                pendingZeroDurationRunnable = null
+                if (requestId == sequence.get() && key == currentKey && session == activeSession) {
+                    dispatchLookup()
                 }
-                pendingZeroDurationRunnable = delayedTask
-                mainHandler.postDelayed(delayedTask, 350L)
-            } else {
-                dispatchLookup()
             }
-
-            return chain.proceed()
+            pendingZeroDurationRunnable = delayedTask
+            mainHandler.postDelayed(delayedTask, 350L)
+        } else {
+            dispatchLookup()
         }
     }
 
@@ -214,24 +228,33 @@ class CarBluetoothLyricController(
         override fun intercept(chain: Chain): Any? {
             val session = chain.thisObject as? MediaSession
             val state = chain.args.firstOrNull() as? PlaybackState
-            if (session != null) {
-                activeSession = session
+            val result = chain.proceed()
+            mainHandler.post {
+                if (activeSession == null) activeSession = session
+                if (session == activeSession) ticker.updatePlaybackState(state)
             }
-            ticker.updatePlaybackState(state)
-            return chain.proceed()
+            return result
         }
     }
 
     private inner class ReleaseHook : Hooker {
         override fun intercept(chain: Chain): Any? {
             val session = chain.thisObject as? MediaSession
-            if (session == activeSession) {
-                pendingZeroDurationRunnable?.let(mainHandler::removeCallbacks)
-                pendingZeroDurationRunnable = null
-                ticker.stop()
-                activeSession = null
+            val result = chain.proceed()
+            mainHandler.post {
+                if (session == activeSession) {
+                    sequence.incrementAndGet()
+                    currentKey = null
+                    executor.cancel()
+                    pendingZeroDurationRunnable?.let(mainHandler::removeCallbacks)
+                    pendingZeroDurationRunnable = null
+                    activeSession = null
+                    originalMetadata = null
+                    ticker.updatePlaybackState(null)
+                    ticker.setSong(null, null)
+                }
             }
-            return chain.proceed()
+            return result
         }
     }
 }

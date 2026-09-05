@@ -22,11 +22,13 @@ internal object LyricsRepository {
         album: String,
         durationMs: Long,
         context: Context? = null,
+        allowNetwork: Boolean = true,
     ): List<RichLyricLine>? {
         val cacheKey = buildCacheKey(title, artist, durationMs)
 
-        // 1. In-memory fast cache
-        cache[cacheKey]?.let { return it }
+        // Persistent storage is authoritative across processes, including manual edits/deletes.
+        LatestLyricLookup.checkCancelled()
+        if (context == null) cache[cacheKey]?.let { return it }
 
         val cleanA = LyricsNormalizer.cleanArtist(artist)
         val cleanTitle = ChineseConverter.normalize(LyricsNormalizer.cleanTitle(title, cleanA))
@@ -69,9 +71,12 @@ internal object LyricsRepository {
             }
         }
 
+        if (!allowNetwork) return null
+
         // 3. Fallback to network providers
         val searchPairs = LyricsNormalizer.resolveSearchPairs(title, artist)
         for ((qTitle, qArtist) in searchPairs) {
+            LatestLyricLookup.checkCancelled()
             val result = fetchLrcFromProviders(qTitle, qArtist, album, durationMs) ?: continue
             val (lrc, source) = result
             val lines = LrcToLyricon.parse(lrc, durationMs)
@@ -83,6 +88,7 @@ internal object LyricsRepository {
                 cache[cacheKey] = lines
                 pruneCacheIfNeeded()
 
+                LatestLyricLookup.checkCancelled()
                 // Save to local persistent cache
                 if (context != null) {
                     LyricsCacheClient.save(
@@ -100,6 +106,7 @@ internal object LyricsRepository {
                 return lines
             }
         }
+        LatestLyricLookup.checkCancelled()
         // Keep unsuccessful songs available for manual searching and editing.
         // Empty records are not playable cache hits, so later playback still retries.
         if (context != null) {
@@ -126,6 +133,7 @@ internal object LyricsRepository {
     ): Pair<String, String>? {
         val searchPairs = LyricsNormalizer.resolveSearchPairs(title, artist)
         for ((qTitle, qArtist) in searchPairs) {
+            LatestLyricLookup.checkCancelled()
             val result = fetchLrcFromProviders(qTitle, qArtist, album, durationMs)
             if (result != null) return result
         }
@@ -138,6 +146,7 @@ internal object LyricsRepository {
         album: String,
         durationMs: Long,
     ): Pair<String, String>? {
+        LatestLyricLookup.checkCancelled()
         // 1. LRCLIB
         runCatching {
             LrclibClient.fetch(title, artist, album, durationMs)
@@ -145,6 +154,7 @@ internal object LyricsRepository {
             Log.w(LrclibXposedModule.TAG, "LRCLIB provider error for '$title' — '$artist'", error)
         }.getOrNull()?.let { return Pair(it, "LRCLIB") }
 
+        LatestLyricLookup.checkCancelled()
         // 2. Netease Cloud Music Fallback
         Log.d(LrclibXposedModule.TAG, "Falling back to Netease for '$title' — '$artist'")
         runCatching {
@@ -153,6 +163,7 @@ internal object LyricsRepository {
             Log.w(LrclibXposedModule.TAG, "Netease provider error for '$title' — '$artist'", error)
         }.getOrNull()?.let { return Pair(it, "网易云") }
 
+        LatestLyricLookup.checkCancelled()
         // 3. Kugou Music Fallback
         Log.d(LrclibXposedModule.TAG, "Falling back to Kugou for '$title' — '$artist'")
         runCatching {

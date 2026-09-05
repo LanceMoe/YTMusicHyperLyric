@@ -5,6 +5,9 @@ import android.content.ContentValues
 import android.database.Cursor
 import android.net.Uri
 import android.os.Bundle
+import android.os.Binder
+import android.os.Process
+import moe.lance.ytmusiclrc.LrclibXposedModule
 
 class LyricsCacheProvider : ContentProvider() {
 
@@ -16,7 +19,17 @@ class LyricsCacheProvider : ContentProvider() {
         return true
     }
 
+    private fun enforceCaller() {
+        val uid = Binder.getCallingUid()
+        if (uid == Process.myUid()) return
+        val packages = context?.packageManager?.getPackagesForUid(uid).orEmpty()
+        if (packages.none { it == LrclibXposedModule.YT_MUSIC || it == LrclibXposedModule.SYSTEM_UI }) {
+            throw SecurityException("Caller is not an authorized lyric host")
+        }
+    }
+
     override fun call(method: String, arg: String?, extras: Bundle?): Bundle? {
+        enforceCaller()
         return when (method) {
             METHOD_GET_LYRIC -> {
                 val cacheKey = arg ?: return null
@@ -98,6 +111,7 @@ class LyricsCacheProvider : ContentProvider() {
         selectionArgs: Array<out String>?,
         sortOrder: String?,
     ): Cursor? {
+        enforceCaller()
         return dbHelper.readableDatabase.query(
             LyricsDatabaseHelper.TABLE_NAME,
             projection,
@@ -109,20 +123,31 @@ class LyricsCacheProvider : ContentProvider() {
         )
     }
 
-    override fun getType(uri: Uri): String = "vnd.android.cursor.dir/moe.lance.ytmusiclrc.cache"
+    override fun getType(uri: Uri): String {
+        enforceCaller()
+        return "vnd.android.cursor.dir/moe.lance.ytmusiclrc.cache"
+    }
 
     override fun insert(uri: Uri, values: ContentValues?): Uri? {
+        enforceCaller()
         val v = values ?: return null
         val id = dbHelper.writableDatabase.insert(LyricsDatabaseHelper.TABLE_NAME, null, v)
+        if (id != -1L) LyricsCacheChanges.notify(requireNotNull(context))
         return if (id != -1L) Uri.withAppendedPath(uri, id.toString()) else null
     }
 
     override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int {
-        return dbHelper.writableDatabase.delete(LyricsDatabaseHelper.TABLE_NAME, selection, selectionArgs)
+        enforceCaller()
+        return dbHelper.writableDatabase.delete(LyricsDatabaseHelper.TABLE_NAME, selection, selectionArgs).also {
+            if (it > 0) LyricsCacheChanges.notify(requireNotNull(context))
+        }
     }
 
     override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?): Int {
-        return dbHelper.writableDatabase.update(LyricsDatabaseHelper.TABLE_NAME, values, selection, selectionArgs)
+        enforceCaller()
+        return dbHelper.writableDatabase.update(LyricsDatabaseHelper.TABLE_NAME, values, selection, selectionArgs).also {
+            if (it > 0) LyricsCacheChanges.notify(requireNotNull(context))
+        }
     }
 
     companion object {

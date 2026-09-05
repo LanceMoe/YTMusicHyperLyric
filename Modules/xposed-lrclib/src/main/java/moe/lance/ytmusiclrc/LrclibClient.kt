@@ -25,7 +25,11 @@ internal object LrclibClient {
                     add("artist_name" to qArtist)
                     album?.takeIf { it.isNotBlank() }?.let { add("album_name" to it) }
                     durationMs.takeIf { it > 0 }?.let { add("duration" to (it / 1_000.0).toString()) }
-                })?.let { JSONObject(it).optString("syncedLyrics").takeIf(::hasLyrics) }
+                })?.let {
+                    val item = JSONObject(it)
+                    val actual = item.optDouble("duration", Double.NaN).takeIf { it.isFinite() }?.times(1000)?.toLong()
+                    if (DurationMatcher.accepts(durationMs, actual)) item.optString("syncedLyrics").takeIf(::hasLyrics) else null
+                }
 
                 if (lyrics != null) {
                     Log.i(LrclibXposedModule.TAG, "LRCLIB exact match hit: '$qTitle' — '$qArtist'")
@@ -76,6 +80,7 @@ internal object LrclibClient {
         }
         val connection = (URL("$endpoint?$query").openConnection() as HttpURLConnection)
         return try {
+            LatestLyricLookup.attach(connection)
             connection.requestMethod = "GET"
             connection.connectTimeout = TIMEOUT_MS
             connection.readTimeout = TIMEOUT_MS
@@ -88,6 +93,7 @@ internal object LrclibClient {
         } catch (_: IOException) {
             null
         } finally {
+            LatestLyricLookup.detach()
             connection.disconnect()
         }
     }
@@ -101,6 +107,7 @@ internal object LrclibClient {
         val expectedArtist = ChineseConverter.normalize(artist)
 
         return mapNotNull { candidate ->
+            if (!DurationMatcher.accepts(duration, candidate.duration)) return@mapNotNull null
             val candidateTitle = ChineseConverter.normalize(candidate.title)
             val candidateArtist = ChineseConverter.normalize(candidate.artist)
 

@@ -47,6 +47,12 @@ class CarLyricTicker(
         triggerImmediateUpdate()
     }
 
+    fun updateMetadata(metadata: MediaMetadata) {
+        originalMetadata = metadata
+        lastPublishedKey = null
+        triggerImmediateUpdate()
+    }
+
     fun updatePlaybackState(state: PlaybackState?) {
         playbackState = state
         val isPlaying = state?.state == PlaybackState.STATE_PLAYING
@@ -140,7 +146,7 @@ class CarLyricTicker(
         val newKey = "$targetTitle\u0000$targetArtist\u0000$targetAlbum"
         if (newKey != lastPublishedKey) {
             lastPublishedKey = newKey
-            val newMetadata = MediaMetadata.Builder(orig)
+            val newMetadata = MediaMetadata.Builder(OriginalSongMetadata.preserve(orig))
                 .putString(MediaMetadata.METADATA_KEY_TITLE, targetTitle)
                 .putString(MediaMetadata.METADATA_KEY_ARTIST, targetArtist)
                 .putString(MediaMetadata.METADATA_KEY_ALBUM, targetAlbum)

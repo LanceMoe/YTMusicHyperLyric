@@ -857,7 +857,7 @@ private fun AboutContent() {
             }
         }.getOrNull()
     }
-    val rawVersionName = packageInfo?.versionName ?: "0.2.0"
+    val rawVersionName = packageInfo?.versionName ?: "0.3.1"
     val versionCode = packageInfo?.let {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             it.longVersionCode
@@ -1031,5 +1031,4 @@ private fun copyToClipboard(context: Context, text: String, toastMessage: String
     clipboard?.setPrimaryClip(clip)
     Toast.makeText(context, toastMessage, Toast.LENGTH_SHORT).show()
 }
-
 

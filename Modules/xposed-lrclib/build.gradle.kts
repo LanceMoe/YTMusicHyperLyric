@@ -11,8 +11,8 @@ android {
         applicationId = "moe.lance.ytmusiclrc"
         minSdk = 33
         targetSdk = 37
-        versionCode = 1
-        versionName = "0.3.0"
+        versionCode = 2
+        versionName = "0.3.1"
     }
 
     buildTypes {
@@ -55,6 +55,7 @@ androidComponents {
 dependencies {
     // LSPosed injects this API into the target process. It must not be packaged into the APK.
     compileOnly("io.github.libxposed:api:102.0.0")
+    implementation("io.github.libxposed:service:102.0.0")
 
     // Formal Lyricon provider protocol used by HyperLyric's SystemUI source.
     implementation("io.github.proify.lyricon:provider:0.1.70")

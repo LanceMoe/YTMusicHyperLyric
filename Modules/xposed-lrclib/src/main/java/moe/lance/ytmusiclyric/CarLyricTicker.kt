@@ -120,7 +120,7 @@ class CarLyricTicker(
 
         val speed = state.playbackSpeed.takeIf { it > 0f } ?: 1.0f
         val elapsed = SystemClock.elapsedRealtime() - state.lastPositionUpdateTime
-        val currentPosMs = (state.position + (elapsed * speed).toLong() + config.offsetMs).coerceAtLeast(0L)
+        val currentPosMs = compensatedPositionMs(state.position, elapsed, speed, config.offsetMs)
 
         val lines = lyrics.orEmpty()
         val activeLine = lines.firstOrNull { it.begin <= currentPosMs && currentPosMs < it.end }
@@ -169,6 +169,12 @@ class CarLyricTicker(
     }
 
     companion object {
+        internal fun compensatedPositionMs(positionMs: Long, elapsedMs: Long, speed: Float, offsetMs: Long): Long {
+            // Positive compensation delays lyrics; keep negative positions so a line
+            // starting at zero is also delayed and the next wake-up uses the full offset.
+            return positionMs + (elapsedMs * speed).toLong() - offsetMs
+        }
+
         fun formatMetadata(
             origTitle: String,
             origArtist: String,
@@ -193,4 +199,3 @@ class CarLyricTicker(
         }
     }
 }
-

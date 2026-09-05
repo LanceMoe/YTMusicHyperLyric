@@ -8,6 +8,34 @@ import org.junit.Test
 class CarLyricTickerTest {
 
     @Test
+    fun compensationChangesActiveLineImmediatelyInBothDirections() {
+        val lines = listOf(
+            RichLyricLine(begin = 0, end = 3000, duration = 3000, text = "First"),
+            RichLyricLine(begin = 3000, end = 6000, duration = 3000, text = "Second"),
+        )
+        fun active(offset: Long): String? {
+            val position = CarLyricTicker.compensatedPositionMs(2000, 500, 1f, offset)
+            return lines.firstOrNull { it.begin <= position && position < it.end }?.text
+        }
+        assertEquals("First", active(0))
+        assertEquals("Second", active(-1000))
+        assertEquals("First", active(1000))
+        assertNull(active(5000))
+    }
+
+    @Test
+    fun positiveCompensationDelaysEvenTheFirstLineAtZero() {
+        assertEquals(-1000L, CarLyricTicker.compensatedPositionMs(0, 0, 1f, 1000))
+        assertEquals(-1L, CarLyricTicker.compensatedPositionMs(0, 999, 1f, 1000))
+        assertEquals(0L, CarLyricTicker.compensatedPositionMs(0, 1000, 1f, 1000))
+    }
+
+    @Test
+    fun compensationUsesExtrapolatedPlaybackPosition() {
+        assertEquals(2500L, CarLyricTicker.compensatedPositionMs(1000, 1000, 2f, 500))
+    }
+
+    @Test
     fun formatsTitleOnlyModeCorrectly() {
         val origTitle = "晴天"
         val origArtist = "周杰伦"
@@ -144,4 +172,3 @@ class CarLyricTickerTest {
         assertEquals(0L, defaultCfg.offsetMs)
     }
 }
-

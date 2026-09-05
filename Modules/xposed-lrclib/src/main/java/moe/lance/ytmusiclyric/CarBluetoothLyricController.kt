@@ -39,6 +39,14 @@ class CarBluetoothLyricController(
     @Volatile private var prefs: SharedPreferences? = null
     @Volatile private var application: Application? = null
     private var pendingZeroDurationRunnable: Runnable? = null
+    // SharedPreferences implementations may retain listeners only weakly.
+    private val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { preferences, _ ->
+        mainHandler.post {
+            val config = CarBluetoothLyricConfig.fromPreferences(preferences)
+            ticker.setConfig(config)
+            Log.i(LrclibXposedModule.TAG, "Car lyric config applied: $config")
+        }
+    }
 
     private val ticker = CarLyricTicker { newMetadata ->
         val session = activeSession ?: return@CarLyricTicker
@@ -101,9 +109,7 @@ class CarBluetoothLyricController(
             prefs?.let { p ->
                 val config = CarBluetoothLyricConfig.fromPreferences(p)
                 ticker.setConfig(config)
-                p.registerOnSharedPreferenceChangeListener { sharedPreferences, _ ->
-                    ticker.setConfig(CarBluetoothLyricConfig.fromPreferences(sharedPreferences))
-                }
+                p.registerOnSharedPreferenceChangeListener(preferenceListener)
             }
         }.onFailure { error ->
             Log.w(LrclibXposedModule.TAG, "Failed to load preferences from module, using defaults", error)

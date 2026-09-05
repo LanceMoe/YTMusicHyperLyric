@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "moe.lance.ytmusiclyric"
+    namespace = "moe.lance.ytmusiclrc"
     compileSdk = 37
 
     defaultConfig {

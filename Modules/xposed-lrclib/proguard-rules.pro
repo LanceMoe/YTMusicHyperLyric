@@ -1,1 +1,1 @@
--keep class moe.lance.ytmusiclyric.LrclibXposedModule { <init>(); }
+-keep class moe.lance.ytmusiclrc.LrclibXposedModule { <init>(); }

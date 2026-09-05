@@ -196,7 +196,7 @@ implementation("top.yukonga.miuix.kmp:miuix-preference-android:0.9.1")
 YTMusicHyperLyric/
 ├── Modules/
 │   └── xposed-lrclib/          # 【当前主力】原生 LSPosed 模块 APK (SystemUI 注入)
-│       ├── src/main/java/moe/lance/ytmusiclyric/
+│       ├── src/main/java/moe/lance/ytmusiclrc/
 │       │   ├── LrclibXposedModule.kt   # LSPosed 入口、SystemUI 监听与 Lyricon Bridge
 │       │   ├── LyricsRepository.kt     # 多源协调器与缓存调度
 │       │   ├── LyricsNormalizer.kt     # 标题/艺术家清洗、UGC 拆解与候选生成

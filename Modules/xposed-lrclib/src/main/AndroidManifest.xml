@@ -4,19 +4,19 @@
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
     <application
-        android:name="moe.lance.ytmusiclyric.ModuleApplication"
+        android:name="moe.lance.ytmusiclrc.ModuleApplication"
         android:allowBackup="false"
         android:label="YouTube Music HyperLyric"
         android:theme="@style/Theme.HyperLyric">
 
         <activity
-            android:name="moe.lance.ytmusiclyric.ui.SettingsActivity"
+            android:name="moe.lance.ytmusiclrc.ui.SettingsActivity"
             android:label="YouTube Music HyperLyric"
             android:exported="true" />
 
         <!-- Keep this entry enabled for LSPosed and the installer's Open button. -->
         <activity
-            android:name="moe.lance.ytmusiclyric.ui.ModuleSettingsActivity"
+            android:name="moe.lance.ytmusiclrc.ui.ModuleSettingsActivity"
             android:label="YouTube Music HyperLyric 设置"
             android:exported="true">
             <intent-filter>
@@ -34,11 +34,11 @@
 
         <!-- Separate launcher entry lets the desktop icon be hidden without hiding LSPosed settings. -->
         <activity-alias
-            android:name="moe.lance.ytmusiclyric.ui.SettingsLauncher"
+            android:name="moe.lance.ytmusiclrc.ui.SettingsLauncher"
             android:label="YouTube Music HyperLyric"
             android:enabled="true"
             android:exported="true"
-            android:targetActivity="moe.lance.ytmusiclyric.ui.SettingsActivity">
+            android:targetActivity="moe.lance.ytmusiclrc.ui.SettingsActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -46,12 +46,12 @@
         </activity-alias>
 
         <activity
-            android:name="moe.lance.ytmusiclyric.ui.LyricDetailActivity"
+            android:name="moe.lance.ytmusiclrc.ui.LyricDetailActivity"
             android:label="歌词详情与编辑"
             android:exported="false" />
 
         <provider
-            android:name="moe.lance.ytmusiclyric.cache.LyricsCacheProvider"
+            android:name="moe.lance.ytmusiclrc.cache.LyricsCacheProvider"
             android:authorities="moe.lance.ytmusiclrc.cache"
             android:exported="true" />
     </application>
